@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>资金费率统计</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: rgba(17, 24, 39, 0.94);
+      --panel-2: rgba(15, 23, 42, 0.9);
+      --line: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --green: #34d399;
+      --red: #fb7185;
+      --blue: #60a5fa;
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      min-height: 100vh;
+      background: var(--bg);
+      font: 14px/1.5 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .wrap {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .top,
+    .toolbar,
+    .coin-actions,
+    .tabs,
+    .coins,
+    .item-head,
+    .item-main,
+    .item-meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .top,
+    .item-head {
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .top {
+      margin-bottom: 18px;
+      align-items: flex-end;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    .meta,
+    .label,
+    .sub,
+    th,
+    .empty,
+    .failed,
+    .day-tip {
+      color: var(--muted);
+    }
+
+    .meta {
+      margin-top: 4px;
+    }
+
+    .tab,
+    .btn,
+    .coin,
+    input[type="text"] {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.72);
+      color: var(--muted);
+    }
+
+    .tab,
+    .btn,
+    .coin {
+      padding: 8px 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .tab.active,
+    .btn.active,
+    .coin.on {
+      color: var(--text);
+      border-color: rgba(96, 165, 250, 0.7);
+      background: rgba(96, 165, 250, 0.14);
+    }
+
+    input[type="text"] {
+      min-width: 220px;
+      padding: 10px 12px;
+      outline: none;
+    }
+
+    input[type="text"]:focus {
+      border-color: rgba(96, 165, 250, 0.8);
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .card,
+    .panel,
+    .item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
+    }
+
+    .card,
+    .panel {
+      padding: 16px;
+    }
+
+    .value {
+      font-size: 26px;
+      font-weight: 700;
+    }
+
+    .sub {
+      margin-top: 6px;
+      font-size: 12px;
+    }
+
+    .failed {
+      margin-bottom: 18px;
+    }
+
+    .view {
+      display: none;
+    }
+
+    .view.active {
+      display: block;
+    }
+
+    .list {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .item {
+      overflow: hidden;
+    }
+
+    .item-head {
+      padding: 14px 16px;
+      cursor: pointer;
+    }
+
+    .item-head:hover {
+      background: rgba(31, 41, 55, 0.82);
+    }
+
+    .name {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pos {
+      color: var(--green);
+    }
+
+    .neg {
+      color: var(--red);
+    }
+
+    .neutral {
+      color: var(--muted);
+    }
+
+    .badge.pos {
+      background: rgba(52, 211, 153, 0.14);
+    }
+
+    .badge.neg {
+      background: rgba(251, 113, 133, 0.14);
+    }
+
+    .badge.neutral {
+      background: rgba(148, 163, 184, 0.12);
+    }
+
+    .item-body {
+      display: none;
+      padding: 0 16px 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .item.open .item-body {
+      display: block;
+    }
+
+    .table-wrap {
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 640px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      text-align: left;
+      white-space: nowrap;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.72);
+    }
+
+    th {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .day-row {
+      cursor: pointer;
+    }
+
+    .day-row:hover {
+      background: rgba(31, 41, 55, 0.42);
+    }
+
+    .day-detail {
+      background: rgba(9, 14, 24, 0.6);
+    }
+
+    .day-detail-box {
+      padding: 14px 0 4px;
+    }
+
+    .day-group {
+      margin-bottom: 14px;
+      border: 1px solid rgba(51, 65, 85, 0.72);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--panel-2);
+    }
+
+    .day-group-title {
+      padding: 10px 12px;
+      font-weight: 700;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.72);
+    }
+
+    @media (max-width: 720px) {
+      .wrap {
+        padding: 14px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      .value {
+        font-size: 22px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>资金费率统计</h1>
+        <div class="meta">周期：{{.Begin}} ~ {{.End}}（{{.Days}} 天）</div>
+        <div class="meta">生成时间：{{.Generated}}</div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-view="detail">币种明细</button>
+        <button class="tab" data-view="daily">日报</button>
+      </div>
+    </div>
+
+    <div class="cards" id="cards"></div>
+    <div class="failed" id="failed"></div>
+
+    <div class="view active" id="detail-view">
+      <div class="panel">
+        <div class="toolbar">
+          <input id="search" type="text" placeholder="搜索币种">
+          <button class="btn active" data-filter="all">全部</button>
+          <button class="btn" data-filter="pos">正收益</button>
+          <button class="btn" data-filter="neg">负收益</button>
+        </div>
+      </div>
+      <div class="list" id="symbol-list"></div>
+    </div>
+
+    <div class="view" id="daily-view">
+      <div class="panel">
+        <div class="coin-actions">
+          <button class="btn" id="all-coins">全选</button>
+          <button class="btn" id="none-coins">清空</button>
+        </div>
+        <div class="coins" id="coin-list" style="margin-top:12px;"></div>
+      </div>
+      <div class="panel table-wrap" style="margin-top:16px;">
+        <table>
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>币种数</th>
+              <th>日均</th>
+              <th>日合计</th>
+              <th>正收益</th>
+              <th>负收益</th>
+            </tr>
+          </thead>
+          <tbody id="daily-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const report = {{.DataJSON }};
+    const EPS = 0.0000001;
+
+    function rateClass(value) {
+      if (Math.abs(value) < EPS) return 'neutral';
+      return value > 0 ? 'pos' : 'neg';
+    }
+
+    function fmt(value) {
+      const n = value * 100;
+      const sign = n > 0 ? '+' : '';
+      return sign + n.toFixed(4) + '%';
+    }
+
+    function fmtTime(ms) {
+      const d = new Date(ms);
+      const pad = value => String(value).padStart(2, '0');
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    }
+
+    function fmtDay(ms) {
+      const d = new Date(ms);
+      const pad = value => String(value).padStart(2, '0');
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    }
+
+    function badge(value) {
+      return `<span class="badge ${rateClass(value)}">${fmt(value)}</span>`;
+    }
+
+    function buildSymbol(raw) {
+      const days = new Map();
+      let total = 0;
+      let usdt = 0;
+      let usdc = 0;
+
+      for (const row of raw.p) {
+        const day = fmtDay(row[0]);
+        const sum = row[1] + row[2];
+
+        total += sum;
+        if (Math.abs(row[1]) >= EPS) usdt += 1;
+        if (Math.abs(row[2]) >= EPS) usdc += 1;
+
+        if (!days.has(day)) {
+          days.set(day, { d: day, t: 0, p: [] });
+        }
+        const item = days.get(day);
+        item.t += sum;
+        item.p.push(row);
+      }
+
+      return {
+        s: raw.s,
+        p: raw.p,
+        n: raw.p.length,
+        u: usdt,
+        c: usdc,
+        t: total,
+        d: [...days.values()].sort((a, b) => b.d.localeCompare(a.d)),
+      };
+    }
+
+    function buildStore(data) {
+      const symbols = data.s.map(buildSymbol);
+      const bySymbol = new Map(symbols.map(item => [item.s, item]));
+      const dayIndex = new Map();
+
+      for (const item of symbols) {
+        for (const day of item.d) {
+          if (!dayIndex.has(day.d)) {
+            dayIndex.set(day.d, []);
+          }
+          dayIndex.get(day.d).push({
+            s: item.s,
+            t: day.t,
+            p: day.p,
+          });
+        }
+      }
+
+      for (const list of dayIndex.values()) {
+        list.sort((a, b) => a.s.localeCompare(b.s));
+      }
+
+      const sortedSymbols = [...symbols].sort((a, b) => a.s.localeCompare(b.s));
+      return { symbols, bySymbol, dayIndex, sortedSymbols };
+    }
+
+    const store = buildStore(report);
+    const state = {
+      view: 'detail',
+      filter: 'all',
+      search: '',
+      selected: new Set(store.symbols.map(item => item.s)),
+      openSymbols: new Set(),
+      openDays: new Set(),
+    };
+
+    function getFilteredSymbols() {
+      const key = state.search.toLowerCase();
+      return store.symbols.filter(item => {
+        const matchText = item.s.toLowerCase().includes(key);
+        const matchType =
+          state.filter === 'all' ||
+          (state.filter === 'pos' && item.t > 0) ||
+          (state.filter === 'neg' && item.t < 0);
+        return matchText && matchType;
+      });
+    }
+
+    function getDailyRows() {
+      const rows = [];
+
+      for (const [day, list] of store.dayIndex.entries()) {
+        const picked = list.filter(item => state.selected.has(item.s));
+        if (!picked.length) continue;
+
+        let total = 0;
+        let pos = 0;
+        let neg = 0;
+
+        for (const item of picked) {
+          total += item.t;
+          if (item.t > EPS) pos += 1;
+          if (item.t < -EPS) neg += 1;
+        }
+
+        rows.push({
+          d: day,
+          c: picked.length,
+          a: picked.length ? total / picked.length : 0,
+          t: total,
+          p: pos,
+          n: neg,
+          x: picked,
+        });
+      }
+
+      rows.sort((a, b) => b.d.localeCompare(a.d));
+      return rows;
+    }
+
+    function renderCards() {
+      const total = store.symbols.reduce((sum, item) => sum + item.t, 0);
+      const pos = store.symbols.filter(item => item.t > 0).length;
+      const neg = store.symbols.filter(item => item.t < 0).length;
+      const top = [...store.symbols]
+        .sort((a, b) => b.t - a.t)
+        .slice(0, 3)
+        .map(item => item.s)
+        .join(' / ') || '-';
+
+      document.getElementById('cards').innerHTML = `
+        <div class="card">
+          <div class="label">总费率</div>
+          <div class="value ${rateClass(total)}">${fmt(total)}</div>
+          <div class="sub">${store.symbols.length} 个币种</div>
+        </div>
+        <div class="card">
+          <div class="label">正收益币种</div>
+          <div class="value pos">${pos}</div>
+          <div class="sub">负收益 ${neg} 个</div>
+        </div>
+        <div class="card">
+          <div class="label">失败币种</div>
+          <div class="value">${(report.f || []).length}</div>
+          <div class="sub">${(report.f || []).join(' / ') || '无'}</div>
+        </div>
+        <div class="card">
+          <div class="label">最高收益组</div>
+          <div class="value" style="font-size:18px;">${top}</div>
+          <div class="sub">${report.b} ~ ${report.e}</div>
+        </div>
+      `;
+    }
+
+    function renderFailed() {
+      const failed = report.f || [];
+      document.getElementById('failed').textContent = failed.length ? `请求失败：${failed.join('、')}` : '';
+    }
+
+    function renderSymbolBody(symbol) {
+      if (!symbol.p.length) {
+        return '<div class="table-wrap"><table><tbody><tr><td colspan="4" class="empty">没有节点数据</td></tr></tbody></table></div>';
+      }
+
+      return `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>USDT</th>
+                <th>USDC</th>
+                <th>合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${[...symbol.p].reverse().map(row => `
+                <tr>
+                  <td>${fmtTime(row[0])}</td>
+                  <td class="${rateClass(row[1])}">${fmt(row[1])}</td>
+                  <td class="${rateClass(row[2])}">${fmt(row[2])}</td>
+                  <td class="${rateClass(row[1] + row[2])}">${fmt(row[1] + row[2])}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderSymbols() {
+      const list = getFilteredSymbols();
+      const root = document.getElementById('symbol-list');
+
+      if (!list.length) {
+        root.innerHTML = '<div class="panel empty">没有匹配币种</div>';
+        return;
+      }
+
+      root.innerHTML = list.map(item => `
+        <div class="item ${state.openSymbols.has(item.s) ? 'open' : ''}" data-symbol="${item.s}">
+          <div class="item-head" data-role="toggle-symbol" data-symbol="${item.s}">
+            <div class="item-main">
+              <span class="name">${item.s}</span>
+              ${badge(item.t)}
+            </div>
+            <div class="item-meta">
+              <span>节点 ${item.n}</span>
+              <span>USDT ${item.u}</span>
+              <span>USDC ${item.c}</span>
+            </div>
+          </div>
+          <div class="item-body">${state.openSymbols.has(item.s) ? renderSymbolBody(item) : ''}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderCoins() {
+      const root = document.getElementById('coin-list');
+      root.innerHTML = store.sortedSymbols
+        .map(item => `<span class="coin ${state.selected.has(item.s) ? 'on' : ''}" data-role="toggle-coin" data-symbol="${item.s}">${item.s}</span>`)
+        .join('');
+    }
+
+    function renderDayDetail(day) {
+      const rows = day.x.map(item => `
+        <div class="day-group">
+          <div class="day-group-title">${item.s} ${badge(item.t)}</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>USDT</th>
+                  <th>USDC</th>
+                  <th>合计</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${[...item.p].reverse().map(row => `
+                  <tr>
+                    <td>${fmtTime(row[0])}</td>
+                    <td class="${rateClass(row[1])}">${fmt(row[1])}</td>
+                    <td class="${rateClass(row[2])}">${fmt(row[2])}</td>
+                    <td class="${rateClass(row[1] + row[2])}">${fmt(row[1] + row[2])}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `).join('');
+
+      return `<div class="day-detail-box">${rows || '<div class="empty">没有节点数据</div>'}</div>`;
+    }
+
+    function renderDaily() {
+      const body = document.getElementById('daily-body');
+      const rows = getDailyRows();
+
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="empty">没有日报数据</td></tr>';
+        return;
+      }
+
+      body.innerHTML = rows.map(row => `
+        <tr class="day-row" data-role="toggle-day" data-day="${row.d}">
+          <td>${row.d}</td>
+          <td>${row.c}</td>
+          <td class="${rateClass(row.a)}">${fmt(row.a)}</td>
+          <td class="${rateClass(row.t)}">${fmt(row.t)}</td>
+          <td class="pos">${row.p}</td>
+          <td class="neg">${row.n}</td>
+        </tr>
+        ${state.openDays.has(row.d) ? `
+          <tr class="day-detail">
+            <td colspan="6">${renderDayDetail(row)}</td>
+          </tr>
+        ` : ''}
+      `).join('');
+    }
+
+    function switchView(view) {
+      state.view = view;
+      document.querySelectorAll('.tab').forEach(node => {
+        node.classList.toggle('active', node.dataset.view === view);
+      });
+      document.getElementById('detail-view').classList.toggle('active', view === 'detail');
+      document.getElementById('daily-view').classList.toggle('active', view === 'daily');
+    }
+
+    document.querySelectorAll('.tab').forEach(node => {
+      node.addEventListener('click', () => switchView(node.dataset.view));
+    });
+
+    document.querySelectorAll('[data-filter]').forEach(node => {
+      node.addEventListener('click', () => {
+        state.filter = node.dataset.filter;
+        document.querySelectorAll('[data-filter]').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.filter === state.filter);
+        });
+        renderSymbols();
+      });
+    });
+
+    document.getElementById('search').addEventListener('input', event => {
+      state.search = event.target.value.trim();
+      renderSymbols();
+    });
+
+    document.getElementById('symbol-list').addEventListener('click', event => {
+      const node = event.target.closest('[data-role="toggle-symbol"]');
+      if (!node) return;
+      const sym = node.dataset.symbol;
+      const box = node.parentElement;
+      const body = box.querySelector('.item-body');
+
+      if (state.openSymbols.has(sym)) {
+        state.openSymbols.delete(sym);
+        box.classList.remove('open');
+        body.innerHTML = '';
+        return;
+      }
+
+      state.openSymbols.add(sym);
+      box.classList.add('open');
+      body.innerHTML = renderSymbolBody(store.bySymbol.get(sym));
+    });
+
+    document.getElementById('coin-list').addEventListener('click', event => {
+      const node = event.target.closest('[data-role="toggle-coin"]');
+      if (!node) return;
+      const sym = node.dataset.symbol;
+
+      if (state.selected.has(sym)) state.selected.delete(sym);
+      else state.selected.add(sym);
+
+      node.classList.toggle('on', state.selected.has(sym));
+      state.openDays.clear();
+      renderDaily();
+    });
+
+    document.getElementById('daily-body').addEventListener('click', event => {
+      const node = event.target.closest('[data-role="toggle-day"]');
+      if (!node) return;
+      const day = node.dataset.day;
+
+      if (state.openDays.has(day)) state.openDays.delete(day);
+      else state.openDays.add(day);
+
+      renderDaily();
+    });
+
+    document.getElementById('all-coins').addEventListener('click', () => {
+      state.selected = new Set(store.symbols.map(item => item.s));
+      state.openDays.clear();
+      renderCoins();
+      renderDaily();
+    });
+
+    document.getElementById('none-coins').addEventListener('click', () => {
+      state.selected = new Set();
+      state.openDays.clear();
+      renderCoins();
+      renderDaily();
+    });
+
+    renderCards();
+    renderFailed();
+    renderSymbols();
+    renderCoins();
+    renderDaily();
+  </script>
+</body>
+
+</html>

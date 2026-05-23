@@ -1,0 +1,35 @@
+# API Key
+api_key: ""
+# API 密钥
+secret_key: ""
+# 代理地址
+proxy_url: ""
+# 持仓比例
+holding_ratio: 0.5
+# 降仓触发保证金率
+margin_ratio_reduce_trigger: 50
+# 加仓触发保证金率
+margin_ratio_add_trigger: 40
+# 降仓目标保证金率
+margin_ratio_reduce_target: 45
+# 最低可用美元
+min_available_usd: 10
+# 基础降仓金额
+reduce_base_usdt: 100
+# 每点保证金率追加降仓金额
+reduce_step_usdt_per_ratio_point: 20
+# 主循环间隔
+main_loop_interval: "10m"
+# 成交等待超时
+fill_timeout: "2m"
+# 下单重试次数
+retry_count: 3
+
+# 交易标的列表
+symbols:
+  # 交易对
+  - symbol: "BTC"
+    # 单次下单金额
+    usdt: 200
+    # 仓位价值上限
+    price: 5000
