@@ -172,7 +172,7 @@ func MarginRatioBeyond() {
 
 		if Env.GetSymbol(symbol) == nil {
 			log.Printf("[高保证金率处理] 未找到 %s 的配置", symbol)
-			return
+			continue
 		}
 
 		extra := decimalMax(decimal.Zero, MarginRate.MarginRatio.Sub(Env.MarginRatioReduceTarget))
@@ -198,7 +198,7 @@ func MarginRatioBeyond() {
 func MarginRatioSmall() {
 	// 保证金率偏低时，优先给当前总持仓价值最小的币种补仓。
 	log.Println("[低保证金率处理] 开始执行")
-	for {
+	for i := 0; i < 10; i++ {
 		symbol := GetMinValueSymbol()
 		if symbol == "" {
 			log.Println("[低保证金率处理] 未找到可补仓的币种")

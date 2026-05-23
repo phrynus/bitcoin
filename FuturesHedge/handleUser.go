@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -50,98 +51,184 @@ func (uh *UserHandler) Start() (chan struct{}, error) {
 		return nil, nil // 已经在运行
 	}
 	uh.isRunning = true
+	// 确保 stopCh 和 Complete 是全新的（支持 Close 后重新 Start）
+	if uh.stopCh == nil {
+		uh.stopCh = make(chan struct{})
+	}
+	if uh.Complete == nil {
+		uh.Complete = make(chan struct{})
+	}
+	uh.completeClosed = false
 	uh.mu.Unlock()
 
-	listenKey, err := Client.NewStartUserStreamService().Do(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	uh.ListenKey = listenKey
+	// 启动WebSocket管理goroutine（内含无限重连 + 自动刷新listenKey）
 	uh.wg.Add(1)
 	go func() {
 		defer uh.wg.Done()
-		uh.RenewListenKey(10 * time.Minute)
-	}()
-
-	// 启动WebSocket连接的goroutine
-	uh.wg.Add(1)
-	go func() {
-		defer uh.wg.Done()
-
-		maxRetries := 5
-		retryCount := 0
-
-		for {
-			select {
-			case <-uh.stopCh: // 检查是否收到停止信号
-				return
-			default:
-				// 尝试建立WebSocket连接
-				doneC, stopC, err := futures.WsUserDataServe(listenKey, uh.UserHandler, func(err error) {
-					log.Printf("用户数据流连接异常: %v", err)
-				})
-				if err != nil {
-					log.Printf("启动用户数据流连接失败: %v", err)
-					retryCount++
-					if retryCount >= maxRetries {
-						log.Printf("用户数据流连接达到最大重试次数")
-						return
-					}
-					// 指数退避策略
-					time.Sleep(time.Duration(retryCount) * time.Second)
-					continue
-				}
-
-				log.Println("用户数据流连接已建立")
-				// 成功建立连接，重置重试计数
-				retryCount = 0
-
-				// 启动一个goroutine来监控停止信号并关闭WebSocket
-				go func() {
-					<-uh.stopCh
-					select {
-					case stopC <- struct{}{}: // 发送停止信号给WebSocket
-					default:
-						// 如果stopC通道已经满了或者无法发送，则跳过
-					}
-				}()
-
-				// 关闭完成通道（只关闭一次）
-				uh.mu.Lock()
-				if !uh.completeClosed {
-					uh.completeClosed = true
-					uh.mu.Unlock()
-					close(uh.Complete)
-				} else {
-					uh.mu.Unlock()
-				}
-
-				// 等待WebSocket连接结束或收到停止信号
-				select {
-				case <-doneC:
-					log.Println("用户数据流连接已关闭，正在尝试重连...")
-					// 连接意外断开，尝试重连
-					retryCount++
-					if retryCount >= maxRetries {
-						log.Printf("用户数据流连接达到最大重试次数")
-						return
-					}
-					time.Sleep(time.Duration(retryCount) * time.Second)
-					continue
-				case <-uh.stopCh:
-					// 收到停止信号，正常退出
-					select {
-					case stopC <- struct{}{}:
-					default:
-						// 如果stopC通道已经满了或者无法发送，则跳过
-					}
-					return
-				}
-			}
-		}
+		uh.runUserDataStream()
 	}()
 
 	return uh.Complete, nil
+}
+
+// runUserDataStream 管理用户数据流的完整生命周期：获取listenKey → 连接 → 断连重试（永不退出，直到 Close）
+func (uh *UserHandler) runUserDataStream() {
+	backoffBase := 1 * time.Second
+	maxBackoff := 60 * time.Second
+	consecutiveFailures := 0
+
+	for {
+		// 每次循环前检查是否已收到停止信号
+		if uh.isStopChClosed() {
+			return
+		}
+
+		// ---------- 1. 获取全新的 listenKey ----------
+		listenKey, err := Client.NewStartUserStreamService().Do(context.Background())
+		if err != nil {
+			log.Printf("[用户数据流] 获取listenKey失败: %v", err)
+			consecutiveFailures++
+			if !uh.sleepWithStopCheck(backoffDuration(backoffBase, consecutiveFailures, maxBackoff)) {
+				return
+			}
+			continue
+		}
+
+		uh.mu.Lock()
+		uh.ListenKey = listenKey
+		uh.mu.Unlock()
+
+		// ---------- 2. 启动该 listenKey 的定时续签 ----------
+		renewDone := make(chan struct{})
+		go func(key string) {
+			defer close(renewDone)
+			uh.renewListenKeyWithStop(key, 10*time.Minute)
+		}(listenKey)
+
+		// ---------- 3. 建立 WebSocket 连接 ----------
+		doneC, stopC, err := futures.WsUserDataServe(listenKey, uh.UserHandler, func(err error) {
+			log.Printf("[用户数据流] 连接异常: %v", err)
+		})
+		fmt.Printf("[用户数据流] 已获取listenKey: %s，正在建立WebSocket连接...\n", listenKey)
+		if err != nil {
+			log.Printf("[用户数据流] 启动连接失败: %v", err)
+			// 通知续签goroutine退出
+			uh.cleanupListenKey(listenKey)
+			<-renewDone
+
+			consecutiveFailures++
+			if !uh.sleepWithStopCheck(backoffDuration(backoffBase, consecutiveFailures, maxBackoff)) {
+				return
+			}
+			continue
+		}
+
+		log.Println("[用户数据流] WebSocket 连接已建立")
+		consecutiveFailures = 0 // 成功后重置失败计数
+
+		// ---------- 4. 通知外部"已就绪"（仅首次） ----------
+		uh.mu.Lock()
+		if !uh.completeClosed {
+			uh.completeClosed = true
+			close(uh.Complete)
+		}
+		uh.mu.Unlock()
+
+		// ---------- 5. 等待连接断开或收到停止信号 ----------
+		select {
+		case <-doneC:
+			log.Println("[用户数据流] 连接已断开，准备重连...")
+			// 清理当前 listenKey
+			uh.cleanupListenKey(listenKey)
+			// 通知续签goroutine退出
+			select {
+			case stopC <- struct{}{}:
+			default:
+			}
+			<-renewDone
+			// 短暂等待后重试
+			if !uh.sleepWithStopCheck(1 * time.Second) {
+				return
+			}
+
+		case <-uh.stopCh:
+			log.Println("[用户数据流] 收到停止信号，关闭连接")
+			// 通知WebSocket和续签goroutine停止
+			select {
+			case stopC <- struct{}{}:
+			default:
+			}
+			<-renewDone
+			uh.cleanupListenKey(listenKey)
+			return
+		}
+	}
+}
+
+// isStopChClosed 检查 stopCh 是否已被关闭
+func (uh *UserHandler) isStopChClosed() bool {
+	select {
+	case <-uh.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// sleepWithStopCheck 休眠指定时长，期间若收到停止信号则提前返回 false
+func (uh *UserHandler) sleepWithStopCheck(d time.Duration) bool {
+	select {
+	case <-uh.stopCh:
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
+
+// cleanupListenKey 关闭指定的 listenKey（内部使用，忽略错误）
+func (uh *UserHandler) cleanupListenKey(listenKey string) {
+	if listenKey == "" {
+		return
+	}
+	if err := Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
+		log.Printf("[用户数据流] 关闭listenKey失败: %v", err)
+	}
+	uh.mu.Lock()
+	if uh.ListenKey == listenKey {
+		uh.ListenKey = ""
+	}
+	uh.mu.Unlock()
+}
+
+// renewListenKeyWithStop 定时续签 listenKey，直到 stopCh 关闭
+func (uh *UserHandler) renewListenKeyWithStop(listenKey string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if listenKey == "" {
+				return
+			}
+			if err := Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
+				log.Printf("[用户数据流] 续签ListenKey失败: %v", err)
+			}
+		case <-uh.stopCh:
+			return
+		}
+	}
+}
+
+// backoffDuration 计算指数退避时长，上限为 max
+func backoffDuration(base time.Duration, failures int, max time.Duration) time.Duration {
+	d := base
+	for i := 1; i < failures && d < max; i++ {
+		d *= 2
+	}
+	if d > max {
+		d = max
+	}
+	return d
 }
 
 // RenewListenKey 定时续签ListenKey
@@ -221,6 +308,7 @@ func (uh *UserHandler) Close() error {
 
 // UserHandler 处理用户数据事件
 func (uh *UserHandler) UserHandler(event *futures.WsUserDataEvent) {
+	// fmt.Printf("[用户数据流] 收到事件: %s\n", event.Event)
 	switch event.Event {
 	case "MARGIN_CALL": // 处理保证金不足通知
 		uh.handleMarginCall(&event.WsUserDataMarginCall)

@@ -4,8 +4,8 @@ api_key: ""
 secret_key: ""
 # 代理地址
 proxy_url: ""
-# 持仓比例
-holding_ratio: 0.5
+# 仓位价值上限的持仓比例
+holding_ratio: 0.8
 # 降仓触发保证金率
 margin_ratio_reduce_trigger: 50
 # 加仓触发保证金率
