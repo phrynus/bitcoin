@@ -86,7 +86,7 @@ func (uh *UserHandler) runUserDataStream() {
 		// ---------- 1. 获取全新的 listenKey ----------
 		listenKey, err := Client.NewStartUserStreamService().Do(context.Background())
 		if err != nil {
-			log.Printf("[用户数据流] 获取listenKey失败: %v", err)
+			log.Printf("获取 Listen Key 失败: %v", err)
 			consecutiveFailures++
 			if !uh.sleepWithStopCheck(backoffDuration(backoffBase, consecutiveFailures, maxBackoff)) {
 				return
@@ -107,11 +107,11 @@ func (uh *UserHandler) runUserDataStream() {
 
 		// ---------- 3. 建立 WebSocket 连接 ----------
 		doneC, stopC, err := futures.WsUserDataServe(listenKey, uh.UserHandler, func(err error) {
-			log.Printf("[用户数据流] 连接异常: %v", err)
+			log.Printf("WebSocket 连接异常: %v", err)
 		})
-		fmt.Printf("[用户数据流] 已获取listenKey: %s，正在建立WebSocket连接...\n", listenKey)
+		fmt.Printf("已获取 Listen Key: %s，正在建立 WebSocket 连接…\n", listenKey)
 		if err != nil {
-			log.Printf("[用户数据流] 启动连接失败: %v", err)
+			log.Printf("启动 WebSocket 连接失败: %v", err)
 			// 通知续签goroutine退出
 			uh.cleanupListenKey(listenKey)
 			<-renewDone
@@ -123,7 +123,7 @@ func (uh *UserHandler) runUserDataStream() {
 			continue
 		}
 
-		log.Println("[用户数据流] WebSocket 连接已建立")
+		log.Println("WebSocket 已连接")
 		consecutiveFailures = 0 // 成功后重置失败计数
 
 		// ---------- 4. 通知外部"已就绪"（仅首次） ----------
@@ -137,7 +137,7 @@ func (uh *UserHandler) runUserDataStream() {
 		// ---------- 5. 等待连接断开或收到停止信号 ----------
 		select {
 		case <-doneC:
-			log.Println("[用户数据流] 连接已断开，准备重连...")
+			log.Println("WebSocket 连接断开，准备重连…")
 			// 清理当前 listenKey
 			uh.cleanupListenKey(listenKey)
 			// 通知续签goroutine退出
@@ -152,7 +152,7 @@ func (uh *UserHandler) runUserDataStream() {
 			}
 
 		case <-uh.stopCh:
-			log.Println("[用户数据流] 收到停止信号，关闭连接")
+			log.Println("收到停止信号，关闭 WebSocket 连接")
 			// 通知WebSocket和续签goroutine停止
 			select {
 			case stopC <- struct{}{}:
@@ -191,7 +191,7 @@ func (uh *UserHandler) cleanupListenKey(listenKey string) {
 		return
 	}
 	if err := Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
-		log.Printf("[用户数据流] 关闭listenKey失败: %v", err)
+		log.Printf("关闭 Listen Key 失败: %v", err)
 	}
 	uh.mu.Lock()
 	if uh.ListenKey == listenKey {
@@ -211,7 +211,7 @@ func (uh *UserHandler) renewListenKeyWithStop(listenKey string, interval time.Du
 				return
 			}
 			if err := Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
-				log.Printf("[用户数据流] 续签ListenKey失败: %v", err)
+				log.Printf("续签 Listen Key 失败: %v", err)
 			}
 		case <-uh.stopCh:
 			return
@@ -246,7 +246,7 @@ func (uh *UserHandler) RenewListenKey(renewInterval time.Duration) {
 			if listenKey != "" {
 				err := Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background())
 				if err != nil {
-					log.Printf("续签ListenKey失败: %v", err)
+					log.Printf("续签 Listen Key 失败: %v", err)
 				}
 			}
 		case <-uh.stopCh:
@@ -286,7 +286,7 @@ func (uh *UserHandler) Close() error {
 		// 正常完成等待
 	case <-time.After(10 * time.Second):
 		// 等待超时，记录警告信息
-		log.Println("警告: 关闭UserHandler超时，可能存在未正确关闭的goroutine")
+		log.Println("关闭 UserHandler 超时，可能有未正确关闭的后台任务")
 	}
 
 	// 如果有ListenKey，则取消它
@@ -298,7 +298,7 @@ func (uh *UserHandler) Close() error {
 	if listenKey != "" {
 		err := Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background())
 		if err != nil {
-			log.Printf("关闭ListenKey时出错: %v", err)
+			log.Printf("关闭 Listen Key 时出错: %v", err)
 			return err
 		}
 	}

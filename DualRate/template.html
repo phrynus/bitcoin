@@ -304,6 +304,7 @@
       <div class="tabs">
         <button class="tab active" data-view="detail">币种明细</button>
         <button class="tab" data-view="daily">日报</button>
+        <button class="tab" data-view="monthly">月报</button>
       </div>
     </div>
 
@@ -346,6 +347,31 @@
         </table>
       </div>
     </div>
+
+    <div class="view" id="monthly-view">
+      <div class="panel">
+        <div class="coin-actions">
+          <button class="btn" id="all-coins-monthly">全选</button>
+          <button class="btn" id="none-coins-monthly">清空</button>
+        </div>
+        <div class="coins" id="coin-list-monthly" style="margin-top:12px;"></div>
+      </div>
+      <div class="panel table-wrap" style="margin-top:16px;">
+        <table>
+          <thead>
+            <tr>
+              <th>月份</th>
+              <th>币种数</th>
+              <th>月均</th>
+              <th>月合计</th>
+              <th>正收益</th>
+              <th>负收益</th>
+            </tr>
+          </thead>
+          <tbody id="monthly-body"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -373,6 +399,12 @@
       const d = new Date(ms);
       const pad = value => String(value).padStart(2, '0');
       return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    }
+
+    function fmtMonth(ms) {
+      const d = new Date(ms);
+      const pad = value => String(value).padStart(2, '0');
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
     }
 
     function badge(value) {
@@ -434,8 +466,36 @@
         list.sort((a, b) => a.s.localeCompare(b.s));
       }
 
+      const monthIndex = new Map();
+      for (const item of symbols) {
+        const monthMap = new Map();
+        for (const day of item.d) {
+          const month = day.d.substring(0, 7);
+          if (!monthMap.has(month)) {
+            monthMap.set(month, { d: month, t: 0, p: [] });
+          }
+          const m = monthMap.get(month);
+          m.t += day.t;
+          m.p.push(...day.p);
+        }
+        for (const [month, m] of monthMap) {
+          if (!monthIndex.has(month)) {
+            monthIndex.set(month, []);
+          }
+          monthIndex.get(month).push({
+            s: item.s,
+            t: m.t,
+            p: m.p,
+          });
+        }
+      }
+
+      for (const list of monthIndex.values()) {
+        list.sort((a, b) => a.s.localeCompare(b.s));
+      }
+
       const sortedSymbols = [...symbols].sort((a, b) => a.s.localeCompare(b.s));
-      return { symbols, bySymbol, dayIndex, sortedSymbols };
+      return { symbols, bySymbol, dayIndex, monthIndex, sortedSymbols };
     }
 
     const store = buildStore(report);
@@ -446,18 +506,22 @@
       selected: new Set(store.symbols.map(item => item.s)),
       openSymbols: new Set(),
       openDays: new Set(),
+      selectedMonthly: new Set(store.symbols.map(item => item.s)),
+      openMonths: new Set(),
     };
 
     function getFilteredSymbols() {
       const key = state.search.toLowerCase();
-      return store.symbols.filter(item => {
-        const matchText = item.s.toLowerCase().includes(key);
-        const matchType =
-          state.filter === 'all' ||
-          (state.filter === 'pos' && item.t > 0) ||
-          (state.filter === 'neg' && item.t < 0);
-        return matchText && matchType;
-      });
+      return store.symbols
+        .filter(item => {
+          const matchText = item.s.toLowerCase().includes(key);
+          const matchType =
+            state.filter === 'all' ||
+            (state.filter === 'pos' && item.t > 0) ||
+            (state.filter === 'neg' && item.t < 0);
+          return matchText && matchType;
+        })
+        .sort((a, b) => b.t - a.t);
     }
 
     function getDailyRows() {
@@ -479,6 +543,38 @@
 
         rows.push({
           d: day,
+          c: picked.length,
+          a: picked.length ? total / picked.length : 0,
+          t: total,
+          p: pos,
+          n: neg,
+          x: picked,
+        });
+      }
+
+      rows.sort((a, b) => b.d.localeCompare(a.d));
+      return rows;
+    }
+
+    function getMonthlyRows() {
+      const rows = [];
+
+      for (const [month, list] of store.monthIndex.entries()) {
+        const picked = list.filter(item => state.selectedMonthly.has(item.s));
+        if (!picked.length) continue;
+
+        let total = 0;
+        let pos = 0;
+        let neg = 0;
+
+        for (const item of picked) {
+          total += item.t;
+          if (item.t > EPS) pos += 1;
+          if (item.t < -EPS) neg += 1;
+        }
+
+        rows.push({
+          d: month,
           c: picked.length,
           a: picked.length ? total / picked.length : 0,
           t: total,
@@ -654,6 +750,71 @@
       `).join('');
     }
 
+    function renderMonthDetail(month) {
+      const rows = month.x.map(item => `
+        <div class="day-group">
+          <div class="day-group-title">${item.s} ${badge(item.t)}</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>USDT</th>
+                  <th>USDC</th>
+                  <th>合计</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${[...item.p].reverse().map(row => `
+                  <tr>
+                    <td>${fmtTime(row[0])}</td>
+                    <td class="${rateClass(row[1])}">${fmt(row[1])}</td>
+                    <td class="${rateClass(row[2])}">${fmt(row[2])}</td>
+                    <td class="${rateClass(row[1] + row[2])}">${fmt(row[1] + row[2])}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `).join('');
+
+      return `<div class="day-detail-box">${rows || '<div class="empty">没有节点数据</div>'}</div>`;
+    }
+
+    function renderCoinsMonthly() {
+      const root = document.getElementById('coin-list-monthly');
+      root.innerHTML = store.sortedSymbols
+        .map(item => `<span class="coin ${state.selectedMonthly.has(item.s) ? 'on' : ''}" data-role="toggle-coin-monthly" data-symbol="${item.s}">${item.s}</span>`)
+        .join('');
+    }
+
+    function renderMonthly() {
+      const body = document.getElementById('monthly-body');
+      const rows = getMonthlyRows();
+
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="empty">没有月报数据</td></tr>';
+        return;
+      }
+
+      body.innerHTML = rows.map(row => `
+        <tr class="day-row" data-role="toggle-month" data-month="${row.d}">
+          <td>${row.d}</td>
+          <td>${row.c}</td>
+          <td class="${rateClass(row.a)}">${fmt(row.a)}</td>
+          <td class="${rateClass(row.t)}">${fmt(row.t)}</td>
+          <td class="pos">${row.p}</td>
+          <td class="neg">${row.n}</td>
+        </tr>
+        ${state.openMonths.has(row.d) ? `
+          <tr class="day-detail">
+            <td colspan="6">${renderMonthDetail(row)}</td>
+          </tr>
+        ` : ''}
+      `).join('');
+    }
+
     function switchView(view) {
       state.view = view;
       document.querySelectorAll('.tab').forEach(node => {
@@ -661,6 +822,7 @@
       });
       document.getElementById('detail-view').classList.toggle('active', view === 'detail');
       document.getElementById('daily-view').classList.toggle('active', view === 'daily');
+      document.getElementById('monthly-view').classList.toggle('active', view === 'monthly');
     }
 
     document.querySelectorAll('.tab').forEach(node => {
@@ -739,11 +901,51 @@
       renderDaily();
     });
 
+    document.getElementById('coin-list-monthly').addEventListener('click', event => {
+      const node = event.target.closest('[data-role="toggle-coin-monthly"]');
+      if (!node) return;
+      const sym = node.dataset.symbol;
+
+      if (state.selectedMonthly.has(sym)) state.selectedMonthly.delete(sym);
+      else state.selectedMonthly.add(sym);
+
+      node.classList.toggle('on', state.selectedMonthly.has(sym));
+      state.openMonths.clear();
+      renderMonthly();
+    });
+
+    document.getElementById('monthly-body').addEventListener('click', event => {
+      const node = event.target.closest('[data-role="toggle-month"]');
+      if (!node) return;
+      const month = node.dataset.month;
+
+      if (state.openMonths.has(month)) state.openMonths.delete(month);
+      else state.openMonths.add(month);
+
+      renderMonthly();
+    });
+
+    document.getElementById('all-coins-monthly').addEventListener('click', () => {
+      state.selectedMonthly = new Set(store.symbols.map(item => item.s));
+      state.openMonths.clear();
+      renderCoinsMonthly();
+      renderMonthly();
+    });
+
+    document.getElementById('none-coins-monthly').addEventListener('click', () => {
+      state.selectedMonthly = new Set();
+      state.openMonths.clear();
+      renderCoinsMonthly();
+      renderMonthly();
+    });
+
     renderCards();
     renderFailed();
     renderSymbols();
     renderCoins();
     renderDaily();
+    renderCoinsMonthly();
+    renderMonthly();
   </script>
 </body>
 

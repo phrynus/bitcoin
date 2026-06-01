@@ -142,13 +142,13 @@ func buildReport(cfg Config) (Report, float64) {
 		if errUSDT != nil {
 			fmt.Printf("[%s] USDT-M 失败: %v\n", sym, errUSDT)
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 
 		usdc, errUSDC := fetchFundingRate(client, sym+"USDC", start, end)
 		if errUSDC != nil {
 			fmt.Printf("[%s] USDC-M 失败: %v\n", sym, errUSDC)
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 
 		if errUSDT != nil && errUSDC != nil {
 			failed = append(failed, sym)
@@ -168,6 +168,7 @@ func buildReport(cfg Config) (Report, float64) {
 		total += sum
 
 		fmt.Printf("[%s] 完成: %d 个节点，合计 %.4f%%\n", sym, len(item.P), sum*100)
+
 	}
 
 	return Report{

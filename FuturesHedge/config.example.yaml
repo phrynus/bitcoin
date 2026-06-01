@@ -1,35 +1,51 @@
-# API Key
+# 币安 API Key
 api_key: ""
-# API 密钥
+# 币安 API 密钥
 secret_key: ""
-# 代理地址
+# HTTP 代理地址，留空直连
 proxy_url: ""
-# 仓位价值上限的持仓比例
+
+# 持仓比例（0~1）
 holding_ratio: 0.8
-# 降仓触发保证金率
+
+# 降仓触发保证金率（%）
 margin_ratio_reduce_trigger: 50
-# 加仓触发保证金率
-margin_ratio_add_trigger: 40
-# 降仓目标保证金率
+# 降仓目标保证金率（%）
 margin_ratio_reduce_target: 45
-# 最低可用美元
+
+# 加仓触发保证金率（%）
+margin_ratio_add_trigger: 40
+# 加仓目标保证金率（%）
+margin_ratio_add_target: 45
+
+# 最低可用资金（USD）
 min_available_usd: 10
-# 基础降仓金额
-reduce_base_usdt: 100
-# 每点保证金率追加降仓金额
-reduce_step_usdt_per_ratio_point: 20
+
+# 基础降仓金额（USDT）
+reduce_base_usdt: 200
+# 追加降仓金额（USDT / 百分点）
+reduce_step_usdt_per_ratio_point: 100
+
 # 主循环间隔
-main_loop_interval: "10m"
-# 成交等待超时
-fill_timeout: "2m"
+main_loop_interval: "2m"
+# 订单成交超时
+fill_timeout: "1m"
+# 减仓后等待
+reduce_wait_interval: "1m"
+# 组合单完成等待
+tc_wait_interval: "3s"
+# 循环步进间隔
+loop_step_interval: "1s"
+
 # 下单重试次数
 retry_count: 3
+# 补仓最大轮次
+max_add_rounds: 10
 
-# 交易标的列表
+# 交易标的
 symbols:
-  # 交易对
-  - symbol: "BTC"
-    # 单次下单金额
-    usdt: 200
-    # 仓位价值上限
+  - symbol: "1000BONK"
+    # 单次下单金额（USDT）
+    usdt: 20
+    # 仓位价值上限（USD）
     price: 5000

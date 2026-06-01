@@ -1,7 +1,3 @@
-# bitcoin
-
-三个加密货币相关的小工具，Go 编写。
-
 ## Coin — 图标爬虫
 
 从 CoinMarketCap 批量下载所有币种的 32/64/128 图标，按符号归档到 `coins/` 目录，`coins/list.json` 记录已下载清单。
@@ -17,15 +13,15 @@ cd Coin && go run .
 复制 `config.example.yaml` → `config.yaml`，填入 API 密钥：
 
 ```yaml
-api_key: ""
-secret_key: ""
-holding_ratio: "0.5"
-margin_ratio_reduce_trigger: "0.5"
-margin_ratio_add_trigger: "0.3"
-margin_ratio_reduce_target: "0.45"
-margin_ratio_add_target: "0.4"
-min_available_usd: "100"
-main_loop_interval: "10m"
+api_key: ''
+secret_key: ''
+holding_ratio: '0.5'
+margin_ratio_reduce_trigger: '0.5'
+margin_ratio_add_trigger: '0.3'
+margin_ratio_reduce_target: '0.45'
+margin_ratio_add_target: '0.4'
+min_available_usd: '100'
+main_loop_interval: '10m'
 ```
 
 ```
@@ -46,6 +42,6 @@ symbols: [BTC, ETH, SOL]
 cd DualRate && go run .
 ```
 
-## 构建
+#### 利润计算
 
-Go 1.21+，`go mod tidy && go build .`
+持仓金额 \* 资金费率% / 持有仓位 = 利润

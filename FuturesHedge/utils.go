@@ -74,7 +74,7 @@ func formatQuantityPrice(symbol string, price, usdt decimal.Decimal) (string, st
 	priceStr := trimDecimalString(priceValue.StringFixed(priceDecimals))
 	quantityStr := trimDecimalString(quantityValue.StringFixed(quantityDecimals))
 
-	log.Printf("[数量价格格式化] symbol=%s，tick=%s，step=%s，price=%s，quantity=%s", symbol, formatDecimal(tickSize), formatDecimal(stepSize), priceStr, quantityStr)
+	log.Printf("数量价格格式化: %s tick=%s step=%s price=%s quantity=%s", symbol, formatDecimal(tickSize), formatDecimal(stepSize), priceStr, quantityStr)
 	return priceStr, quantityStr, nil
 }
 
@@ -97,7 +97,7 @@ func formatQuantity(symbol string, quantity decimal.Decimal) (string, error) {
 	quantityTicks := quantity.Div(stepSize).Ceil()
 	quantityValue := quantityTicks.Mul(stepSize)
 	quantityStr := trimDecimalString(quantityValue.StringFixed(quantityDecimals))
-	log.Printf("[数量格式化] symbol=%s，step=%s，quantity=%s", symbol, formatDecimal(stepSize), quantityStr)
+	log.Printf("数量格式化: %s step=%s quantity=%s", symbol, formatDecimal(stepSize), quantityStr)
 	return quantityStr, nil
 }
 
@@ -112,7 +112,7 @@ func RetryFunc(maxRetries int, orderFunc func() error) error {
 		if lastErr == nil {
 			return nil
 		}
-		log.Printf("[重试] 第 %d/%d 次执行失败: %v", i+1, maxRetries+1, lastErr)
+		log.Printf("第 %d/%d 次重试失败: %v", i+1, maxRetries+1, lastErr)
 	}
 	return fmt.Errorf("order failed after %d retries: %w", maxRetries+1, lastErr)
 }
@@ -127,7 +127,7 @@ func InitPositions() map[string]TCPosition {
 
 // FormatSymbol 把账户持仓整理成按币种聚合后的 USDT/USDC 双边结构。
 func FormatSymbol(positions []PositionMarginDetail) {
-	log.Printf("[仓位整理] 开始整理 %d 条持仓数据", len(positions))
+	log.Printf("开始整理 %d 条持仓数据…", len(positions))
 	formatted := InitPositions()
 
 	for _, pos := range positions {
@@ -166,18 +166,18 @@ func FormatSymbol(positions []PositionMarginDetail) {
 	}
 
 	TCPositions = formatted
-	log.Printf("[仓位整理] 持仓整理完成")
+	log.Println("持仓整理完成")
 }
 
 // BalancePositions 检查同一币种的 USDT/USDC 双边仓位是否平衡，并提交修正单。
 func BalancePositions() bool {
-	log.Println("[仓位平衡] 开始检查持仓平衡")
+	log.Println("检查双边持仓是否平衡…")
 	didLiquidate := false
 
 	for symbol, pos := range TCPositions {
 		symbolConfig := Env.GetSymbol(symbol)
 		if symbolConfig == nil {
-			log.Printf("[仓位平衡] 未找到 %s 的配置", symbol)
+			log.Printf("没有 %s 的配置，跳过平衡检查", symbol)
 			continue
 		}
 
@@ -200,7 +200,7 @@ func BalancePositions() bool {
 			// )
 			if currentValue.GreaterThan(targetValue) {
 				closeValue := currentValue.Sub(targetValue)
-				log.Printf("[仓位平衡] %s 需要减仓，value=%s", symbol, formatDecimalFixed(closeValue, 2))
+				log.Printf("%s 持仓价值偏高，需要减仓 %s", symbol, formatDecimalFixed(closeValue, 2))
 				CreateTC(symbol, closeValue, decimal.Zero)
 				didLiquidate = true
 			}
@@ -210,10 +210,10 @@ func BalancePositions() bool {
 		if pos.USDC.Quantity.GreaterThan(pos.USDT.Quantity) {
 			quantity, err := formatQuantity(symbol+"USDC", diff)
 			if err != nil {
-				log.Printf("[仓位平衡] 格式化 %s 的 USDC 数量失败: %v", symbol, err)
+				log.Printf("格式化 %s USDC 数量失败: %v", symbol, err)
 				continue
 			}
-			log.Printf("[仓位平衡] 平掉 %s 多余的 USDC 空仓，quantity=%s", symbol, quantity)
+			log.Printf("平掉 %s 多余的 USDC 空仓，数量 %s", symbol, quantity)
 			CreateUSDC(symbol, quantity)
 			didLiquidate = true
 			continue
@@ -221,18 +221,18 @@ func BalancePositions() bool {
 
 		quantity, err := formatQuantity(symbol+"USDT", diff.Neg())
 		if err != nil {
-			log.Printf("[仓位平衡] 格式化 %s 的 USDT 数量失败: %v", symbol, err)
+			log.Printf("格式化 %s USDT 数量失败: %v", symbol, err)
 			continue
 		}
-		log.Printf("[仓位平衡] 平掉 %s 多余的 USDT 多仓，quantity=%s", symbol, quantity)
+		log.Printf("平掉 %s 多余的 USDT 多仓，数量 %s", symbol, quantity)
 		CloseUSDT(symbol, quantity)
 		didLiquidate = true
 	}
 
 	if didLiquidate {
-		log.Println("[仓位平衡] 已提交再平衡订单")
+		log.Println("再平衡订单已提交")
 	} else {
-		log.Println("[仓位平衡] 当前持仓已平衡")
+		log.Println("当前双边持仓已平衡")
 	}
 	return didLiquidate
 }
