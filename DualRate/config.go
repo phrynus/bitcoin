@@ -9,12 +9,16 @@ import (
 )
 
 type Config struct {
-	Days    int      `yaml:"days"`
-	Symbols []string `yaml:"symbols"`
+	Days        int      `yaml:"days"`
+	Symbols     []string `yaml:"symbols"`
+	DelayPair   int      `yaml:"delay_pair"`   // 同一币种 USDT 与 USDC 请求之间的延迟（秒）
+	DelaySymbol int      `yaml:"delay_symbol"` // 不同币种之间的延迟（秒）
 }
 
 var defaultConfig = Config{
-	Days: 30,
+	Days:        30,
+	DelayPair:   1,
+	DelaySymbol: 3,
 	Symbols: []string{
 		"1000BONK", "1000PEPE", "1000SHIB", "AAVE", "ARB", "AVAX", "BCH", "BIO",
 		"BNB", "BOME", "BTC", "CRV", "DOGE", "ENA", "ETH", "ETHFI", "FIL", "HBAR",
@@ -25,14 +29,22 @@ var defaultConfig = Config{
 
 func cloneConfig(cfg Config) Config {
 	return Config{
-		Days:    cfg.Days,
-		Symbols: append([]string(nil), cfg.Symbols...),
+		Days:        cfg.Days,
+		DelayPair:   cfg.DelayPair,
+		DelaySymbol: cfg.DelaySymbol,
+		Symbols:     append([]string(nil), cfg.Symbols...),
 	}
 }
 
 func normalizeConfig(cfg Config) Config {
 	if cfg.Days <= 0 {
 		cfg.Days = defaultConfig.Days
+	}
+	if cfg.DelayPair <= 0 {
+		cfg.DelayPair = defaultConfig.DelayPair
+	}
+	if cfg.DelaySymbol <= 0 {
+		cfg.DelaySymbol = defaultConfig.DelaySymbol
 	}
 
 	list := make([]string, 0, len(cfg.Symbols))

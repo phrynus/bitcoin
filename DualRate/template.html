@@ -350,9 +350,13 @@
 
     <div class="view" id="monthly-view">
       <div class="panel">
-        <div class="coin-actions">
-          <button class="btn" id="all-coins-monthly">全选</button>
-          <button class="btn" id="none-coins-monthly">清空</button>
+        <div class="coin-actions" style="justify-content:space-between;">
+          <div>
+            <button class="btn" id="all-coins-monthly">全选</button>
+            <button class="btn" id="none-coins-monthly">清空</button>
+          </div>
+          <div id="monthly-summary" style="display:flex;align-items:center;gap:16px;font-size:13px;color:var(--muted);">
+          </div>
         </div>
         <div class="coins" id="coin-list-monthly" style="margin-top:12px;"></div>
       </div>
@@ -782,6 +786,18 @@
       return `<div class="day-detail-box">${rows || '<div class="empty">没有节点数据</div>'}</div>`;
     }
 
+    function renderMonthlySummary() {
+      const selected = store.symbols.filter(item => state.selectedMonthly.has(item.s));
+      const total = selected.reduce((sum, item) => sum + item.t, 0);
+      const avg = selected.length ? total / selected.length : 0;
+
+      document.getElementById('monthly-summary').innerHTML = `
+        <span>筛选总费率：<strong class="${rateClass(total)}" style="font-weight:700;">${fmt(total)}</strong></span>
+        <span>平均费率：<strong class="${rateClass(avg)}" style="font-weight:700;">${fmt(avg)}</strong></span>
+        <span style="color:var(--muted);font-size:12px;">已选 ${selected.length}/${store.symbols.length}</span>
+      `;
+    }
+
     function renderCoinsMonthly() {
       const root = document.getElementById('coin-list-monthly');
       root.innerHTML = store.sortedSymbols
@@ -912,6 +928,7 @@
       node.classList.toggle('on', state.selectedMonthly.has(sym));
       state.openMonths.clear();
       renderMonthly();
+      renderMonthlySummary();
     });
 
     document.getElementById('monthly-body').addEventListener('click', event => {
@@ -930,6 +947,7 @@
       state.openMonths.clear();
       renderCoinsMonthly();
       renderMonthly();
+      renderMonthlySummary();
     });
 
     document.getElementById('none-coins-monthly').addEventListener('click', () => {
@@ -937,6 +955,7 @@
       state.openMonths.clear();
       renderCoinsMonthly();
       renderMonthly();
+      renderMonthlySummary();
     });
 
     renderCards();
@@ -946,6 +965,7 @@
     renderDaily();
     renderCoinsMonthly();
     renderMonthly();
+    renderMonthlySummary();
   </script>
 </body>
 

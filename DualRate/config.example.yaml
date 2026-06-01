@@ -1,3 +1,6 @@
+delay_pair: 5
+delay_symbol: 10
+
 symbols:
   - 1000BONK
   - 1000PEPE
@@ -32,4 +35,4 @@ symbols:
   - WLD
   - XRP
 
-days: 180
+days: 730

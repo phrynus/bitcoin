@@ -142,13 +142,14 @@ func buildReport(cfg Config) (Report, float64) {
 		if errUSDT != nil {
 			fmt.Printf("[%s] USDT-M 失败: %v\n", sym, errUSDT)
 		}
-		time.Sleep(1 * time.Second)
+
+		time.Sleep(time.Duration(cfg.DelayPair) * time.Second)
 
 		usdc, errUSDC := fetchFundingRate(client, sym+"USDC", start, end)
 		if errUSDC != nil {
 			fmt.Printf("[%s] USDC-M 失败: %v\n", sym, errUSDC)
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(time.Duration(cfg.DelaySymbol) * time.Second)
 
 		if errUSDT != nil && errUSDC != nil {
 			failed = append(failed, sym)
