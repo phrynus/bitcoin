@@ -209,6 +209,7 @@ func MarginRatioSmall() {
 		if MarginRate.MarginRatio.GreaterThan(Env.MarginRatioAddTarget) {
 			if MarginRate.MarginRatio.GreaterThan(Env.MarginRatioReduceTrigger) {
 				MarginRatioBeyond()
+				return
 			}
 			break
 		}
