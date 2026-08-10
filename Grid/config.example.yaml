@@ -1,0 +1,6 @@
+# 币安 API Key
+api_key: ""
+# 币安 API 密钥
+secret_key: ""
+# HTTP 代理地址，留空直连
+proxy_url: ""
