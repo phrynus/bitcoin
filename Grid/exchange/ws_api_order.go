@@ -6,29 +6,29 @@ import (
 
 // WsOrder 下单返回的订单信息(order.place)。
 type WsOrder struct {
-	OrderID               int64  `json:"orderId"`               // 订单 ID
-	Symbol                string `json:"symbol"`                // 交易对
-	Status                string `json:"status"`                // 订单状态(NEW/PARTIALLY_FILLED/FILLED/CANCELED/EXPIRED)
-	ClientOrderID         string `json:"clientOrderId"`         // 客户端订单 ID
-	ModifyID              int64  `json:"modifyId"`              // 用户自定义改单标识, 仅 order.modify 传入时返回
-	Price                 string `json:"price"`                 // 订单价格
-	OrigQty               string `json:"origQty"`               // 原始数量
-	ExecutedQty           string `json:"executedQty"`           // 已成交量
-	CumQty                string `json:"cumQty"`                // 累计成交量
-	TimeInForce           string `json:"timeInForce"`           // 有效方式(GTC/IOC/FOK/GTX/GTD/RPI)
-	Type                  string `json:"type"`                  // 订单类型(LIMIT/MARKET)
-	ReduceOnly            bool   `json:"reduceOnly"`            // 是否只减仓
-	ClosePosition         bool   `json:"closePosition"`         // 是否平仓
-	Side                  string `json:"side"`                  // 买卖方向(BUY/SELL)
-	PositionSide          string `json:"positionSide"`          // 持仓方向(BOTH/LONG/SHORT)
-	StopPrice             string `json:"stopPrice"`             // 触发价
-	WorkingType           string `json:"workingType"`           // 触发价格类型(MARK_PRICE/CONTRACT_PRICE)
-	PriceProtect          bool   `json:"priceProtect"`          // 是否启用价格保护
-	OrigType              string `json:"origType"`              // 原始订单类型
-	PriceMatch            string `json:"priceMatch"`            // 价格匹配模式
+	OrderID                 int64  `json:"orderId"`                 // 订单 ID
+	Symbol                  string `json:"symbol"`                  // 交易对
+	Status                  string `json:"status"`                  // 订单状态(NEW/PARTIALLY_FILLED/FILLED/CANCELED/EXPIRED)
+	ClientOrderID           string `json:"clientOrderId"`           // 客户端订单 ID
+	ModifyID                int64  `json:"modifyId"`                // 用户自定义改单标识, 仅 order.modify 传入时返回
+	Price                   string `json:"price"`                   // 订单价格
+	OrigQty                 string `json:"origQty"`                 // 原始数量
+	ExecutedQty             string `json:"executedQty"`             // 已成交量
+	CumQty                  string `json:"cumQty"`                  // 累计成交量
+	TimeInForce             string `json:"timeInForce"`             // 有效方式(GTC/IOC/FOK/GTX/GTD/RPI)
+	Type                    string `json:"type"`                    // 订单类型(LIMIT/MARKET)
+	ReduceOnly              bool   `json:"reduceOnly"`              // 是否只减仓
+	ClosePosition           bool   `json:"closePosition"`           // 是否平仓
+	Side                    string `json:"side"`                    // 买卖方向(BUY/SELL)
+	PositionSide            string `json:"positionSide"`            // 持仓方向(BOTH/LONG/SHORT)
+	StopPrice               string `json:"stopPrice"`               // 触发价
+	WorkingType             string `json:"workingType"`             // 触发价格类型(MARK_PRICE/CONTRACT_PRICE)
+	PriceProtect            bool   `json:"priceProtect"`            // 是否启用价格保护
+	OrigType                string `json:"origType"`                // 原始订单类型
+	PriceMatch              string `json:"priceMatch"`              // 价格匹配模式
 	SelfTradePreventionMode string `json:"selfTradePreventionMode"` // 自成交保护模式
-	GoodTillDate          int64  `json:"goodTillDate"`          // GTD 订单的自动取消时间(毫秒)
-	UpdateTime            int64  `json:"updateTime"`            // 最后更新时间(毫秒)
+	GoodTillDate            int64  `json:"goodTillDate"`            // GTD 订单的自动取消时间(毫秒)
+	UpdateTime              int64  `json:"updateTime"`              // 最后更新时间(毫秒)
 }
 
 // PlaceOrder 下单(order.place, 签名接口)。

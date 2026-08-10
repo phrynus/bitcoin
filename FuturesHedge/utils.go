@@ -121,23 +121,23 @@ func RetryFunc(maxRetries int, orderFunc func() error) error {
 	return fmt.Errorf("order failed after %d retries: %w", maxRetries+1, lastErr)
 }
 
-func InitPositions() map[string]TCPosition {
+func (a *Account) InitPositions() map[string]TCPosition {
 	positions := make(map[string]TCPosition)
-	for _, symbol := range Env.Symbols {
+	for _, symbol := range GetEnv().Symbols {
 		positions[symbol.Symbol] = TCPosition{}
 	}
 	return positions
 }
 
 // FormatSymbol 把账户持仓整理成按币种聚合后的 USDT/USDC 双边结构。
-func FormatSymbol(positions []PositionMarginDetail) {
-	logger.Infof("开始整理 %d 条持仓数据…", len(positions))
-	formatted := InitPositions()
+func (a *Account) FormatSymbol(positions []PositionMarginDetail) {
+	a.Log.Infof("开始整理 %d 条持仓数据…", len(positions))
+	formatted := a.InitPositions()
 
 	for _, pos := range positions {
 		quantity := pos.PositionAmt
 		usd := pos.PositionAmt.Mul(pos.MarkPrice)
-		logger.Debugf("[仓位整理] symbol=%s position=%s mark=%s profit=%s usd=%s",
+		a.Log.Debugf("[仓位整理] symbol=%s position=%s mark=%s profit=%s usd=%s",
 			pos.Symbol,
 			formatDecimalFixed(pos.PositionAmt, 4),
 			formatDecimalFixed(pos.MarkPrice, 6),
@@ -169,24 +169,25 @@ func FormatSymbol(positions []PositionMarginDetail) {
 		formatted[symbolValue] = p
 	}
 
-	TCPositions = formatted
-	logger.Info("持仓整理完成")
+	a.TCPositions = formatted
+	a.Log.Info("持仓整理完成")
 }
 
 // BalancePositions 检查同一币种的 USDT/USDC 双边仓位是否平衡，并提交修正单。
-func BalancePositions() bool {
-	logger.Info("检查双边持仓是否平衡…")
+func (a *Account) BalancePositions() bool {
+	a.Log.Info("检查双边持仓是否平衡…")
 	didLiquidate := false
+	env := GetEnv()
 
-	for symbol, pos := range TCPositions {
-		symbolConfig := Env.GetSymbol(symbol)
+	for symbol, pos := range a.TCPositions {
+		symbolConfig := env.GetSymbol(symbol)
 		if symbolConfig == nil {
-			logger.Warnf("没有 %s 的配置，跳过平衡检查", symbol)
+			a.Log.Warnf("没有 %s 的配置，跳过平衡检查", symbol)
 			continue
 		}
 
 		diff := pos.USDC.Quantity.Sub(pos.USDT.Quantity)
-		logger.Debugf("[仓位平衡] %s usdc=%s usdt=%s diff=%s",
+		a.Log.Debugf("[仓位平衡] %s usdc=%s usdt=%s diff=%s",
 			symbol,
 			formatDecimalFixed(pos.USDC.Quantity, 4),
 			formatDecimalFixed(pos.USDT.Quantity, 4),
@@ -195,17 +196,17 @@ func BalancePositions() bool {
 
 		if diff.Abs().LessThan(balanceEqualThreshold) {
 			currentValue := pos.USDC.Quantity.Mul(pos.USDC.Price)
-			targetValue := symbolConfig.Price.Mul(Env.HoldingRatio)
-			logger.Debugf("[仓位平衡] %s current=%s target=%s holding_ratio=%s",
+			targetValue := symbolConfig.Price.Mul(env.HoldingRatio)
+			a.Log.Debugf("[仓位平衡] %s current=%s target=%s holding_ratio=%s",
 				symbol,
 				formatDecimalFixed(currentValue, 2),
 				formatDecimalFixed(targetValue, 2),
-				formatDecimal(Env.HoldingRatio),
+				formatDecimal(env.HoldingRatio),
 			)
 			if currentValue.GreaterThan(targetValue) {
 				closeValue := currentValue.Sub(targetValue)
-				logger.Infof("%s 持仓价值偏高，需要减仓 %s", symbol, formatDecimalFixed(closeValue, 2))
-				CreateTC(symbol, closeValue, decimal.Zero)
+				a.Log.Infof("%s 持仓价值偏高，需要减仓 %s", symbol, formatDecimalFixed(closeValue, 2))
+				a.CreateTC(symbol, closeValue, decimal.Zero)
 				didLiquidate = true
 			}
 			continue
@@ -214,41 +215,41 @@ func BalancePositions() bool {
 		if pos.USDC.Quantity.GreaterThan(pos.USDT.Quantity) {
 			quantity, err := formatQuantity(symbol+"USDC", diff)
 			if err != nil {
-				logger.Errorf("格式化 %s USDC 数量失败: %v", symbol, err)
+				a.Log.Errorf("格式化 %s USDC 数量失败: %v", symbol, err)
 				continue
 			}
-			logger.Infof("平掉 %s 多余的 USDC 空仓，数量 %s", symbol, quantity)
-			CreateUSDC(symbol, quantity)
+			a.Log.Infof("平掉 %s 多余的 USDC 空仓，数量 %s", symbol, quantity)
+			a.CreateUSDC(symbol, quantity)
 			didLiquidate = true
 			continue
 		}
 
 		quantity, err := formatQuantity(symbol+"USDT", diff.Neg())
 		if err != nil {
-			logger.Errorf("格式化 %s USDT 数量失败: %v", symbol, err)
+			a.Log.Errorf("格式化 %s USDT 数量失败: %v", symbol, err)
 			continue
 		}
-		logger.Infof("平掉 %s 多余的 USDT 多仓，数量 %s", symbol, quantity)
-		CloseUSDT(symbol, quantity)
+		a.Log.Infof("平掉 %s 多余的 USDT 多仓，数量 %s", symbol, quantity)
+		a.CloseUSDT(symbol, quantity)
 		didLiquidate = true
 	}
 
 	if didLiquidate {
-		logger.Info("再平衡订单已提交")
+		a.Log.Info("再平衡订单已提交")
 	} else {
-		logger.Info("当前双边持仓已平衡")
+		a.Log.Info("当前双边持仓已平衡")
 	}
 	return didLiquidate
 }
 
-func GetMinValueSymbol() string {
+func (a *Account) GetMinValueSymbol() string {
 	minSymbol := ""
 	minValue := decimal.Zero
 	initialized := false
 
-	for symbol, pos := range TCPositions {
+	for symbol, pos := range a.TCPositions {
 		totalValue := pos.USDC.Quantity.Mul(pos.USDC.Price).Add(pos.USDT.Quantity.Mul(pos.USDT.Price))
-		logger.Debugf("[最小价值] %s totalValue=%s", symbol, formatDecimalFixed(totalValue, 2))
+		a.Log.Debugf("[最小价值] %s totalValue=%s", symbol, formatDecimalFixed(totalValue, 2))
 		if !initialized || totalValue.LessThan(minValue) {
 			minValue = totalValue
 			minSymbol = symbol
@@ -259,14 +260,14 @@ func GetMinValueSymbol() string {
 	return minSymbol
 }
 
-func GetMaxProfitSymbol() string {
+func (a *Account) GetMaxProfitSymbol() string {
 	maxSymbol := ""
 	maxProfit := decimal.Zero
 	initialized := false
 
-	for symbol, pos := range TCPositions {
+	for symbol, pos := range a.TCPositions {
 		totalProfit := pos.USDC.Profit.Add(pos.USDT.Profit)
-		logger.Debugf("[最大盈利] %s totalProfit=%s", symbol, formatDecimalFixed(totalProfit, 2))
+		a.Log.Debugf("[最大盈利] %s totalProfit=%s", symbol, formatDecimalFixed(totalProfit, 2))
 		if !initialized || totalProfit.GreaterThan(maxProfit) {
 			maxProfit = totalProfit
 			maxSymbol = symbol

@@ -5,7 +5,6 @@ package main
 // Windows 构建命令：
 // $env:GOOS="windows"; $env:GOARCH="amd64"; $env:CGO_ENABLED="0"; go build -ldflags="-s -w" .
 
-
 import (
 	"context"
 	"main/logger"
@@ -39,6 +38,7 @@ func main() {
 	balance, _ := exc.WsApi.Depth(context.Background(), "BTCUSDT", 5)
 	logger.Info(balance)
 
+	logger.Info("═══ 关闭项目 ═══")
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit

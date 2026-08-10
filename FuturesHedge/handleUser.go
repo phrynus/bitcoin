@@ -19,6 +19,7 @@ type FuturesUserHandlerHook struct {
 	HandleOrderTradeUpdatePartial *func(data *futures.WsUserDataOrderTradeUpdate) // 处理订单交易更新 部分成交
 }
 type UserHandler struct {
+	Client    *futures.Client // 账户独立的币安客户端
 	ListenKey string
 	stopCh    chan struct{}  // 用于停止续签和WebSocket的统一通道
 	wg        sync.WaitGroup // 等待goroutine完成
@@ -35,6 +36,7 @@ type UserHandler struct {
 // 监听用户合约数据
 func NewFuturesUserHandler(c *futures.Client) *UserHandler {
 	uh := &UserHandler{
+		Client:          c,
 		stopCh:          make(chan struct{}),
 		wg:              sync.WaitGroup{},
 		Hook:            &FuturesUserHandlerHook{},
@@ -85,7 +87,7 @@ func (uh *UserHandler) runUserDataStream() {
 		}
 
 		// ---------- 1. 获取全新的 listenKey ----------
-		listenKey, err := Client.NewStartUserStreamService().Do(context.Background())
+		listenKey, err := uh.Client.NewStartUserStreamService().Do(context.Background())
 		if err != nil {
 			logger.Errorf("获取 Listen Key 失败: %v", err)
 			consecutiveFailures++
@@ -196,7 +198,7 @@ func (uh *UserHandler) cleanupListenKey(listenKey string) {
 	if listenKey == "" {
 		return
 	}
-	if err := Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
+	if err := uh.Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
 		logger.Errorf("关闭 Listen Key 失败: %v", err)
 	} else {
 		logger.Debugf("Listen Key %s 已关闭", listenKey)
@@ -218,7 +220,7 @@ func (uh *UserHandler) renewListenKeyWithStop(listenKey string, interval time.Du
 			if listenKey == "" {
 				return
 			}
-			if err := Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
+			if err := uh.Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
 				logger.Errorf("续签 Listen Key 失败: %v", err)
 			}
 		case <-uh.stopCh:
@@ -252,7 +254,7 @@ func (uh *UserHandler) RenewListenKey(renewInterval time.Duration) {
 			uh.mu.Unlock()
 
 			if listenKey != "" {
-				err := Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background())
+				err := uh.Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background())
 				if err != nil {
 					logger.Errorf("续签 Listen Key 失败: %v", err)
 				}
@@ -304,7 +306,7 @@ func (uh *UserHandler) Close() error {
 	uh.mu.Unlock()
 
 	if listenKey != "" {
-		err := Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background())
+		err := uh.Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background())
 		if err != nil {
 			logger.Errorf("关闭 Listen Key 时出错: %v", err)
 			return err

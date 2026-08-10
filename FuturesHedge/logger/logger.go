@@ -183,6 +183,7 @@ type Logger struct {
 	size   int64        // 当前文件已写入字节数（近似）
 	closed int32        // 原子标记
 	sub    bool         // 为 true 表示是 Sub 创建的子日志器，Close 不关文件
+	root   *Logger      // 根日志器引用；nil 表示自身为根
 
 	// 异步模式专用
 	ch   chan *logEntry // 日志条目通道
@@ -303,6 +304,10 @@ func (l *Logger) Close() error {
 // 子日志器与父日志器写入同一文件、共享同一异步通道，仅 tag 不同。
 // 子日志器不需要（也不应该）调用 Close，关闭父日志器即可。
 func (l *Logger) Sub(tag string) *Logger {
+	root := l
+	if l.root != nil {
+		root = l.root
+	}
 	return &Logger{
 		cfg: Config{
 			Filename:    l.cfg.Filename,
@@ -317,6 +322,7 @@ func (l *Logger) Sub(tag string) *Logger {
 		ch:   l.ch,
 		done: l.done,
 		pool: sync.Pool{New: func() any { return &logEntry{} }},
+		root: root,
 		sub:  true,
 	}
 }
@@ -348,6 +354,9 @@ func stdInit() *Logger {
 	})
 	return std
 }
+
+// Default 返回包级默认日志器（懒加载，与包级函数共用同一实例）。
+func Default() *Logger { return stdInit() }
 
 // SetDefault 在使用任何包级函数前自定义默认日志器。
 // 如果已触发过懒加载则无效，请在 import 后立即调用。
@@ -403,7 +412,13 @@ func (l *Logger) log(level Level, format string, args ...any) {
 	if level < l.cfg.MinLevel {
 		return
 	}
-	if atomic.LoadInt32(&l.closed) == 1 {
+	// 子日志器共享根日志器的通道：根日志器关闭后必须停止写入，
+	// 否则会向已关闭的 channel 发送导致 panic。
+	root := l
+	if l.root != nil {
+		root = l.root
+	}
+	if atomic.LoadInt32(&root.closed) == 1 {
 		return
 	}
 

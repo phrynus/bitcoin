@@ -1,28 +1,24 @@
-# 币安 API Key
-api_key: ""
-# 币安 API 密钥
-secret_key: ""
 # HTTP 代理地址，留空直连
-proxy_url: ""
+proxy_url: "http://192.168.10.211:7897/"
 
 # 持仓比例（0~1）
-holding_ratio: 0.8
+holding_ratio: 0.9
 
 # 降仓触发保证金率（%）
-margin_ratio_reduce_trigger: 50
+margin_ratio_reduce_trigger: 60
 # 降仓目标保证金率（%）
-margin_ratio_reduce_target: 45
+margin_ratio_reduce_target: 50
 
 # 加仓触发保证金率（%）
-margin_ratio_add_trigger: 40
+margin_ratio_add_trigger: 45
 # 加仓目标保证金率（%）
-margin_ratio_add_target: 45
+margin_ratio_add_target: 50
 
 # 最低可用资金（USD）
-min_available_usd: 10
+min_available_usd: 20
 
 # 基础降仓金额（USDT）
-reduce_base_usdt: 200
+reduce_base_usdt: 100
 # 追加降仓金额（USDT / 百分点）
 reduce_step_usdt_per_ratio_point: 100
 
@@ -49,3 +45,37 @@ symbols:
     usdt: 20
     # 仓位价值上限（USD）
     price: 5000
+
+  - symbol: "1000PEPE"
+    usdt: 20
+    price: 5000
+
+  - symbol: "BIO"
+    usdt: 20
+    price: 5000
+
+  - symbol: "ENA"
+    usdt: 20
+    price: 5000
+
+  - symbol: "NEAR"
+    usdt: 20
+    price: 5000
+
+  - symbol: "TIA"
+    usdt: 20
+    price: 5000
+
+  - symbol: "WIF"
+    usdt: 20
+    price: 5000
+
+# 账户启动时间错位
+account_stagger_interval: "10s"
+
+# 多账户列表
+accounts:
+  # 追加账户示例
+  # - name: "账户"
+  #   api_key: ""
+  #   secret_key: ""

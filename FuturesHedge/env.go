@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -15,34 +17,51 @@ type SymbolConfig struct {
 	Price  decimal.Decimal `yaml:"price"`
 }
 
-type EnvConfig struct {
-	APIKey                      string          `yaml:"api_key"`                          // Binance API Key
-	SecretKey                   string          `yaml:"secret_key"`                       // Binance Secret Key
-	ProxyURL                    string          `yaml:"proxy_url"`                        // 代理地址
-	HoldingRatio                decimal.Decimal `yaml:"holding_ratio"`                    // 持仓比例
-	MarginRatioReduceTrigger    decimal.Decimal `yaml:"margin_ratio_reduce_trigger"`      // 降仓触发保证金率
-	MarginRatioAddTrigger       decimal.Decimal `yaml:"margin_ratio_add_trigger"`         // 加仓触发保证金率
-	MarginRatioReduceTarget     decimal.Decimal `yaml:"margin_ratio_reduce_target"`       // 降仓目标保证金率
-	MarginRatioAddTarget        decimal.Decimal `yaml:"margin_ratio_add_target"`          // 加仓目标保证金率
-	MinAvailableUSD             decimal.Decimal `yaml:"min_available_usd"`                // 最低可用美元
-	ReduceBaseUsdt              decimal.Decimal `yaml:"reduce_base_usdt"`                 // 基础降仓金额
-	ReduceStepUsdtPerRatioPoint decimal.Decimal `yaml:"reduce_step_usdt_per_ratio_point"` // 每点保证金率追加降仓金额
-	MainLoopInterval            string          `yaml:"main_loop_interval"`               // 主循环间隔
-	FillTimeout                 string          `yaml:"fill_timeout"`                     // 成交等待超时
-	RetryCount                  int             `yaml:"retry_count"`                      // 下单重试次数
-	ReduceWaitInterval          string          `yaml:"reduce_wait_interval"`             // 减仓后等待间隔
-	MaxAddRounds                int             `yaml:"max_add_rounds"`                   // 补仓最大轮次
-	TCWaitInterval              string          `yaml:"tc_wait_interval"`                 // 组合单完成后等待
-	LoopStepInterval            string          `yaml:"loop_step_interval"`               // 循环内步进间隔
-	MainLoopIntervalDuration    time.Duration   `yaml:"-"`                                // 主循环间隔时间
-	FillTimeoutDuration         time.Duration   `yaml:"-"`                                // 成交等待超时时间
-	ReduceWaitIntervalDuration  time.Duration   `yaml:"-"`                                // 减仓后等待时间
-	TCWaitIntervalDuration      time.Duration   `yaml:"-"`                                // 组合单完成后等待时间
-	LoopStepIntervalDuration    time.Duration   `yaml:"-"`                                // 循环内步进间隔时间
-	Symbols                     []SymbolConfig  `yaml:"symbols"`                          // 交易标的列表
+type AccountConfig struct {
+	Name      string `yaml:"name"`       // 账户名称（用于日志标识）
+	APIKey    string `yaml:"api_key"`    // Binance API Key
+	SecretKey string `yaml:"secret_key"` // Binance Secret Key
 }
 
-var Env *EnvConfig
+type EnvConfig struct {
+	ProxyURL                       string          `yaml:"proxy_url"`                        // 代理地址
+	HoldingRatio                   decimal.Decimal `yaml:"holding_ratio"`                    // 持仓比例
+	MarginRatioReduceTrigger       decimal.Decimal `yaml:"margin_ratio_reduce_trigger"`      // 降仓触发保证金率
+	MarginRatioAddTrigger          decimal.Decimal `yaml:"margin_ratio_add_trigger"`         // 加仓触发保证金率
+	MarginRatioReduceTarget        decimal.Decimal `yaml:"margin_ratio_reduce_target"`       // 降仓目标保证金率
+	MarginRatioAddTarget           decimal.Decimal `yaml:"margin_ratio_add_target"`          // 加仓目标保证金率
+	MinAvailableUSD                decimal.Decimal `yaml:"min_available_usd"`                // 最低可用美元
+	ReduceBaseUsdt                 decimal.Decimal `yaml:"reduce_base_usdt"`                 // 基础降仓金额
+	ReduceStepUsdtPerRatioPoint    decimal.Decimal `yaml:"reduce_step_usdt_per_ratio_point"` // 每点保证金率追加降仓金额
+	MainLoopInterval               string          `yaml:"main_loop_interval"`               // 主循环间隔
+	FillTimeout                    string          `yaml:"fill_timeout"`                     // 成交等待超时
+	RetryCount                     int             `yaml:"retry_count"`                      // 下单重试次数
+	ReduceWaitInterval             string          `yaml:"reduce_wait_interval"`             // 减仓后等待间隔
+	MaxAddRounds                   int             `yaml:"max_add_rounds"`                   // 补仓最大轮次
+	TCWaitInterval                 string          `yaml:"tc_wait_interval"`                 // 组合单完成后等待
+	LoopStepInterval               string          `yaml:"loop_step_interval"`               // 循环内步进间隔
+	AccountStaggerInterval         string          `yaml:"account_stagger_interval"`         // 账户启动时间错位间隔
+	MainLoopIntervalDuration       time.Duration   `yaml:"-"`                                // 主循环间隔时间
+	FillTimeoutDuration            time.Duration   `yaml:"-"`                                // 成交等待超时时间
+	ReduceWaitIntervalDuration     time.Duration   `yaml:"-"`                                // 减仓后等待时间
+	TCWaitIntervalDuration         time.Duration   `yaml:"-"`                                // 组合单完成后等待时间
+	LoopStepIntervalDuration       time.Duration   `yaml:"-"`                                // 循环内步进间隔时间
+	AccountStaggerIntervalDuration time.Duration   `yaml:"-"`                                // 账户启动时间错位间隔
+	Symbols                        []SymbolConfig  `yaml:"symbols"`                          // 交易标的列表
+	Accounts                       []AccountConfig `yaml:"accounts"`                         // 账户列表
+}
+
+var (
+	envMu sync.RWMutex
+	Env   *EnvConfig
+)
+
+// GetEnv 并发安全地获取当前共享配置。
+func GetEnv() *EnvConfig {
+	envMu.RLock()
+	defer envMu.RUnlock()
+	return Env
+}
 
 var (
 	defaultMarginRatioReduceTrigger    = decimal.NewFromInt(50)
@@ -58,17 +77,27 @@ var (
 	defaultMaxAddRounds                = 10
 	defaultTCWaitInterval              = 3 * time.Second
 	defaultLoopStepInterval            = 1 * time.Second
+	defaultAccountStaggerInterval      = 10 * time.Second
 )
 
 func initEnv() error {
 	var err error
-	Env, err = loadEnvConfig("config.yaml")
+	env, err := loadEnvConfig("config.yaml")
 	if err != nil {
 		return err
 	}
 
-	if Env.APIKey == "" || Env.SecretKey == "" {
-		return errors.New("missing required config: api_key and secret_key")
+	envMu.Lock()
+	Env = env
+	envMu.Unlock()
+
+	if len(Env.Accounts) == 0 {
+		return errors.New("missing required config: accounts")
+	}
+	for i, acc := range Env.Accounts {
+		if acc.APIKey == "" || acc.SecretKey == "" {
+			return fmt.Errorf("account[%d] %q missing api_key or secret_key", i, acc.Name)
+		}
 	}
 
 	return nil
@@ -80,7 +109,9 @@ func RefreshEnv() error {
 		return err
 	}
 
+	envMu.Lock()
 	Env = env
+	envMu.Unlock()
 	return nil
 }
 
@@ -176,6 +207,16 @@ func (e *EnvConfig) applyDefaults() error {
 		loopStepInterval = d
 	}
 	e.LoopStepIntervalDuration = loopStepInterval
+
+	accountStaggerInterval := defaultAccountStaggerInterval
+	if e.AccountStaggerInterval != "" {
+		d, err := time.ParseDuration(e.AccountStaggerInterval)
+		if err != nil {
+			return errors.New("parse account_stagger_interval failed: " + err.Error())
+		}
+		accountStaggerInterval = d
+	}
+	e.AccountStaggerIntervalDuration = accountStaggerInterval
 
 	return nil
 }
