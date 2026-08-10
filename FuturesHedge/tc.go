@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
+
+	"main/logger"
 
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/google/uuid"
@@ -37,12 +38,13 @@ func NewTC(symbol string, usdt decimal.Decimal) *TC {
 
 // Start 发起组合单的第一步：先在 USDC 合约挂空单等待成交。
 func (t *TC) Start() (chan struct{}, chan error) {
-	log.Printf("开始执行组合单，%s 金额 %s，ID: %s", t.Symbol, formatDecimalFixed(t.Usdt, 2), t.ID)
+	logger.Infof("开始执行组合单，%s 金额 %s，ID: %s", t.Symbol, formatDecimalFixed(t.Usdt, 2), t.ID)
 
 	bookTicker, err := Client.NewListBookTickersService().Symbol(t.Symbol + "USDC").Do(context.Background())
 	if err != nil {
-		log.Printf("获取 %sUSDC 盘口失败: %v", t.Symbol, err)
+		logger.Errorf("获取 %sUSDC 盘口失败: %v", t.Symbol, err)
 	}
+	logger.Debugf("组合单 %s: 获取到 %d 条盘口数据", t.ID, len(bookTicker))
 	if len(bookTicker) == 0 {
 		err := errors.New("book ticker not found")
 		t.errCh <- err
@@ -53,13 +55,13 @@ func (t *TC) Start() (chan struct{}, chan error) {
 	askPrice := parseDecimal(bookTicker[0].AskPrice)
 	price, quantity, err := formatQuantityPrice(t.Symbol+"USDC", askPrice, t.Usdt)
 	if err != nil {
-		log.Printf("计算下单价格和数量失败: %v", err)
+		logger.Errorf("计算下单价格和数量失败: %v", err)
 		t.errCh <- err
 		close(t.errCh)
 		return t.doneC, t.errCh
 	}
 
-	log.Printf("提交 USDC 卖单，%sUSDC 价格 %s 数量 %s", t.Symbol, price, quantity)
+	logger.Infof("提交 USDC 卖单，%sUSDC 价格 %s 数量 %s", t.Symbol, price, quantity)
 	err = RetryFunc(Env.RetryCount, func() error {
 		_, err := Client.NewCreateOrderService().
 			NewClientOrderID(t.ID).
@@ -74,16 +76,16 @@ func (t *TC) Start() (chan struct{}, chan error) {
 		return err
 	})
 	if err != nil {
-		log.Printf("提交 USDC 卖单失败: %v", err)
+		logger.Errorf("提交 USDC 卖单失败: %v", err)
 		t.errCh <- fmt.Errorf("place USDC order failed: %w", err)
 		close(t.errCh)
 		return t.doneC, t.errCh
 	}
 
 	t.timer = time.AfterFunc(Env.FillTimeoutDuration, func() {
-		log.Printf("订单超时未成交，ID: %s", t.ID)
+		logger.Warnf("订单超时未成交，ID: %s", t.ID)
 		if err := t.cancelOrder(); err != nil {
-			log.Printf("取消订单失败: %v", err)
+			logger.Errorf("取消订单失败: %v", err)
 		}
 		t.errCh <- errors.New("order timed out before fill")
 		close(t.errCh)
@@ -94,14 +96,15 @@ func (t *TC) Start() (chan struct{}, chan error) {
 
 // HandleFilled 在第一笔 USDC 空单成交后，补上对应的 USDT 多单完成对冲。
 func (t *TC) HandleFilled(data *futures.WsUserDataOrderTradeUpdate) {
-	log.Printf("首笔卖单已成交，%s 数量 %s", t.Symbol, data.OrderTradeUpdate.OriginalQty)
+	logger.Infof("首笔卖单已成交，%s 数量 %s", t.Symbol, data.OrderTradeUpdate.OriginalQty)
+	logger.Debugf("组合单 %s: 成交价=%s 成交数量=%s", t.ID, data.OrderTradeUpdate.AveragePrice, data.OrderTradeUpdate.OriginalQty)
 	if t.timer != nil {
 		t.timer.Stop()
 	}
 
 	quantity, err := formatQuantity(t.Symbol+"USDT", parseDecimal(data.OrderTradeUpdate.OriginalQty))
 	if err != nil {
-		log.Printf("格式化 USDT 下单数量失败: %v", err)
+		logger.Errorf("格式化 USDT 下单数量失败: %v", err)
 		return
 	}
 	err = RetryFunc(Env.RetryCount, func() error {
@@ -115,14 +118,16 @@ func (t *TC) HandleFilled(data *futures.WsUserDataOrderTradeUpdate) {
 		return err
 	})
 	if err != nil {
-		log.Printf("买入 USDT 失败，回退：平掉 USDC 空单: %v", err)
+		logger.Errorf("买入 USDT 失败，回退：平掉 USDC 空单: %v", err)
+		logger.Debugf("组合单 %s: 回退平仓 USDC 数量=%s", t.ID, data.OrderTradeUpdate.OriginalQty)
 		CreateUSDC(t.Symbol, data.OrderTradeUpdate.OriginalQty)
 		t.errCh <- fmt.Errorf("buy USDT failed: %w", err)
 		close(t.errCh)
 		return
 	}
 
-	log.Println("对冲完成")
+	logger.Info("对冲完成")
+	logger.Debugf("组合单 %s: 全部完成，关闭完成通道", t.ID)
 	if t.timer != nil {
 		t.timer.Stop()
 	}
@@ -130,6 +135,7 @@ func (t *TC) HandleFilled(data *futures.WsUserDataOrderTradeUpdate) {
 }
 
 func (t *TC) cancelOrder() error {
+	logger.Debugf("组合单 %s: 开始取消 USDC 挂单", t.ID)
 	return RetryFunc(Env.RetryCount, func() error {
 		_, err := Client.NewCancelOrderService().
 			Symbol(t.Symbol + "USDC").
@@ -141,7 +147,7 @@ func (t *TC) cancelOrder() error {
 
 func CreateUSDC(symbol string, quantity string) {
 	// CreateUSDC 用市价单回补 USDC 空仓。
-	log.Printf("回补 %s USDC 空仓，数量 %s", symbol, quantity)
+	logger.Infof("回补 %s USDC 空仓，数量 %s", symbol, quantity)
 	err := RetryFunc(Env.RetryCount, func() error {
 		_, err := Client.NewCreateOrderService().
 			Symbol(symbol + "USDC").
@@ -153,13 +159,13 @@ func CreateUSDC(symbol string, quantity string) {
 		return err
 	})
 	if err != nil {
-		log.Printf("回补 USDC 空仓失败: %v", err)
+		logger.Errorf("回补 USDC 空仓失败: %v", err)
 	}
 }
 
 func CloseUSDT(symbol string, quantity string) {
 	// CloseUSDT 用市价单卖出 USDT 多仓。
-	log.Printf("平掉 %s USDT 多仓，数量 %s", symbol, quantity)
+	logger.Infof("平掉 %s USDT 多仓，数量 %s", symbol, quantity)
 	err := RetryFunc(Env.RetryCount, func() error {
 		_, err := Client.NewCreateOrderService().
 			Symbol(symbol + "USDT").
@@ -171,35 +177,37 @@ func CloseUSDT(symbol string, quantity string) {
 		return err
 	})
 	if err != nil {
-		log.Printf("平掉 USDT 多仓失败: %v", err)
+		logger.Errorf("平掉 USDT 多仓失败: %v", err)
 	}
 }
 
 // CreateTC 按给定数量或给定金额执行一组减仓对冲单。
 func CreateTC(symbol string, usdt, q decimal.Decimal) {
-	log.Printf("开始减仓对冲，%s 金额 %s 数量 %s", symbol, formatDecimalFixed(usdt, 2), formatDecimalFixed(q, 4))
+	logger.Infof("开始减仓对冲，%s 金额 %s 数量 %s", symbol, formatDecimalFixed(usdt, 2), formatDecimalFixed(q, 4))
 
 	bookTicker, err := Client.NewListBookTickersService().Symbol(symbol + "USDC").Do(context.Background())
 	if err != nil {
-		log.Printf("获取 %sUSDC 盘口失败: %v", symbol, err)
+		logger.Errorf("获取 %sUSDC 盘口失败: %v", symbol, err)
 	}
 
 	quantity := ""
 	if q.GreaterThan(decimal.Zero) {
+		logger.Debugf("减仓对冲 %s: 按指定数量 mode, q=%s", symbol, formatDecimalFixed(q, 4))
 		quantity, err = formatQuantity(symbol+"USDC", q)
 		if err != nil {
-			log.Printf("格式化下单数量失败: %v", err)
+			logger.Errorf("格式化下单数量失败: %v", err)
 			return
 		}
 	} else {
+		logger.Debugf("减仓对冲 %s: 按金额换算 mode, usdt=%s", symbol, formatDecimalFixed(usdt, 2))
 		if len(bookTicker) == 0 {
-			log.Printf("缺少 %sUSDC 盘口数据", symbol)
+			logger.Warnf("缺少 %sUSDC 盘口数据", symbol)
 			return
 		}
 		bidPrice := parseDecimal(bookTicker[0].BidPrice)
 		_, quantity, err = formatQuantityPrice(symbol+"USDC", bidPrice, usdt)
 		if err != nil {
-			log.Printf("按金额换算数量失败: %v", err)
+			logger.Errorf("按金额换算数量失败: %v", err)
 			return
 		}
 	}
@@ -215,14 +223,15 @@ func CreateTC(symbol string, usdt, q decimal.Decimal) {
 		return err
 	})
 	if err != nil {
-		log.Printf("平掉 USDC 空仓失败: %v", err)
+		logger.Errorf("平掉 USDC 空仓失败: %v", err)
 	}
 
 	quantityUsdt, err := formatQuantity(symbol+"USDT", parseDecimal(quantity))
 	if err != nil {
-		log.Printf("格式化 USDT 下单数量失败: %v", err)
+		logger.Errorf("格式化 USDT 下单数量失败: %v", err)
 		return
 	}
+	logger.Debugf("减仓对冲 %s: USDC平仓=%s USDT平仓=%s", symbol, quantity, quantityUsdt)
 
 	err = RetryFunc(Env.RetryCount, func() error {
 		_, err := Client.NewCreateOrderService().
@@ -235,6 +244,6 @@ func CreateTC(symbol string, usdt, q decimal.Decimal) {
 		return err
 	})
 	if err != nil {
-		log.Printf("平掉 USDT 多仓失败: %v", err)
+		logger.Errorf("平掉 USDT 多仓失败: %v", err)
 	}
 }

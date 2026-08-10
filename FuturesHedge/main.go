@@ -7,13 +7,14 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"main/exchange"
+	"main/logger"
 
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/shopspring/decimal"
@@ -43,60 +44,86 @@ type TCPosition struct {
 }
 
 func init() {
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	// 初始化日志器
+	logger.SetDefault(logger.Config{
+		Filename:    "app.log",
+		MaxSize:     52428800,
+		MinLevel:    logger.ParseLevel("DEBUG"),
+		StdoutLevel: logger.ParseLevel("INFO"),
+		Color:       true,
+		FileLine:    false,
+		Tag:         "MAIN",
+		Async:       true,
+		BufferSize:  4096,
+		Compress:    true,
+	})
 
 	if err := initEnv(); err != nil {
-		log.Fatal(err)
+		fmt.Printf("初始化环境失败: %v", err)
+		os.Exit(1)
 	}
 
 	Client = &futures.Client{}
 	if Env.ProxyURL != "" {
 		Client = futures.NewProxiedClient(Env.APIKey, Env.SecretKey, Env.ProxyURL)
+		futures.SetWsProxyUrl(Env.ProxyURL) // WebSocket 代理需单独设置
 	} else {
 		Client = futures.NewClient(Env.APIKey, Env.SecretKey)
 	}
 
 	if err := Client.NewPingService().Do(context.Background()); err != nil {
-		log.Fatal(err)
+		fmt.Printf("交易所 Ping 失败: %v", err)
+		os.Exit(1)
 	}
 
 	var err error
-	ExchangeInfo, err = exchange.FetchExchangeInfo()
+	ExchangeInfo, err = exchange.FetchExchangeInfo(Env.ProxyURL)
 	if err != nil {
-		log.Fatalf("获取交易所信息失败了: %v", err)
+		fmt.Printf("获取交易所信息失败了: %v", err)
+		os.Exit(1)
 	}
 
-	log.Println("正在启动用户数据处理器…")
+	logger.Info("正在启动用户数据处理器…")
 	Uh = NewFuturesUserHandler(Client)
 	uhComplete, err := Uh.Start()
 	if err != nil {
-		log.Fatalf("启动用户数据处理器失败: %v", err)
+		fmt.Printf("启动用户数据处理器失败: %v", err)
+		os.Exit(1)
 	}
-	log.Println("等待用户数据流预热完成…")
+	logger.Info("等待用户数据流预热完成…")
 	<-uhComplete
-	log.Println("用户数据处理器已就绪")
+	logger.Info("用户数据处理器已就绪")
+	logger.Debugf("当前配置: symbols=%v holdingRatio=%s reduceTrigger=%s addTrigger=%s",
+		Env.GetAllSymbols(), formatDecimal(Env.HoldingRatio),
+		formatDecimal(Env.MarginRatioReduceTrigger), formatDecimal(Env.MarginRatioAddTrigger))
 }
 
 func main() {
-	defer Uh.Close()
+	defer func() {
+		Uh.Close()
+		logger.Close()
+	}()
 
 	go func() {
 		for {
-			log.Println("===== 新一轮处理开始 =====")
+			logger.Info("=========================")
+			logger.Info("===== 新一轮处理开始 =====")
+			logger.Info("=========================")
 			GetTCPositions()
 
 			if MarginRate == nil {
-				log.Println("保证金率暂时不可用，休息 10 分钟再试")
+				logger.Info("保证金率暂时不可用，休息 10 分钟再试")
 				time.Sleep(Env.MainLoopIntervalDuration)
 				continue
 			}
 
-			log.Printf("当前保证金率 %s%%", formatDecimalFixed(MarginRate.MarginRatio, 4))
+			logger.Infof("当前保证金率 %s%%", formatDecimalFixed(MarginRate.MarginRatio, 4))
 
 			if !MarginRate.MarginRatio.IsZero() {
-				log.Println("检查双边仓位是否平衡…")
+				logger.Info("检查双边仓位是否平衡…")
 				if BalancePositions() {
-					log.Println("再平衡订单已提交，本轮其他操作跳过")
+					logger.Info("再平衡订单已提交，本轮其他操作跳过")
 					continue
 				}
 			}
@@ -106,14 +133,14 @@ func main() {
 			} else if MarginRate.MarginRatio.LessThan(Env.MarginRatioAddTrigger) {
 				MarginRatioSmall()
 			} else {
-				log.Println("保证金率在安全范围，无需操作")
+				logger.Info("保证金率在安全范围，无需操作")
 			}
 
-			log.Printf("本轮处理完成，休息 %s", Env.MainLoopIntervalDuration.String())
+			logger.Infof("本轮处理完成，休息 %s", Env.MainLoopIntervalDuration.String())
 			time.Sleep(Env.MainLoopIntervalDuration)
 
 			if err := RefreshEnv(); err != nil {
-				log.Printf("刷新配置失败: %v", err)
+				logger.Errorf("刷新配置失败: %v", err)
 			}
 		}
 	}()
@@ -125,25 +152,28 @@ func main() {
 }
 
 func GetTCPositions() {
+	logger.Debug("开始获取仓位和保证金率…")
 	result, err := CalcMarginRatio(context.Background(), Client, "")
 	if err != nil {
-		log.Printf("计算保证金率失败: %v", err)
+		logger.Errorf("计算保证金率失败: %v", err)
 		return
 	}
 
 	MarginRate = result
+	logger.Debugf("仓位更新完成: marginRatio=%s%% positions=%d",
+		formatDecimalFixed(result.MarginRatio, 4), len(result.Positions))
 	FormatSymbol(result.Positions)
 }
 
 // HasSufficientAvailableBalance 计算多币种账户折算后的总可用资金，低于阈值时停止继续下单。
 func HasSufficientAvailableBalance(scene string) bool {
 	if MarginRate == nil {
-		log.Printf("保证金率结果为空，跳过 %s 下单", scene)
+		logger.Warnf("保证金率结果为空，跳过 %s 下单", scene)
 		return false
 	}
 
 	if MarginRate.TotalAvailable.LessThan(Env.MinAvailableUSD) {
-		log.Printf("当前总可用资金 %s USD 已低于阈值 %s USD，%s 暂停下单",
+		logger.Warnf("当前总可用资金 %s USD 已低于阈值 %s USD，%s 暂停下单",
 			formatDecimalFixed(MarginRate.TotalAvailable, 2),
 			formatDecimalFixed(Env.MinAvailableUSD, 2),
 			scene,
@@ -151,32 +181,44 @@ func HasSufficientAvailableBalance(scene string) bool {
 		return false
 	}
 
+	logger.Debugf("可用资金检查通过: available=%s USD threshold=%s USD scene=%s",
+		formatDecimalFixed(MarginRate.TotalAvailable, 2),
+		formatDecimalFixed(Env.MinAvailableUSD, 2),
+		scene,
+	)
 	return true
 }
 
 func MarginRatioBeyond() {
 	// 保证金率过高时，优先减掉盈利最大的组合，释放保证金占用。
-	log.Println("保证金率偏高，开始减仓处理")
+	logger.Info("保证金率偏高，开始减仓处理")
 	for {
 		symbol := GetMaxProfitSymbol()
 		if symbol == "" {
-			log.Println("没有找到可减仓的盈利币种")
+			logger.Info("没有找到可减仓的盈利币种")
 			return
 		}
 
-		log.Printf("减仓中… 当前保证金率 %s%%", formatDecimalFixed(MarginRate.MarginRatio, 4))
+		logger.Infof("减仓中… 当前保证金率 %s%%", formatDecimalFixed(MarginRate.MarginRatio, 4))
 		if MarginRate.MarginRatio.LessThan(Env.MarginRatioReduceTarget) {
-			log.Println("保证金率已降到安全水位，减仓结束")
+			logger.Info("保证金率已降到安全水位，减仓结束")
 			break
 		}
 
 		if Env.GetSymbol(symbol) == nil {
-			log.Printf("没有 %s 的配置信息，跳过", symbol)
+			logger.Warnf("没有 %s 的配置信息，跳过", symbol)
 			continue
 		}
 
 		extra := decimalMax(decimal.Zero, MarginRate.MarginRatio.Sub(Env.MarginRatioReduceTarget))
 		usdt := Env.ReduceBaseUsdt.Add(extra.Mul(Env.ReduceStepUsdtPerRatioPoint)).Round(0)
+		logger.Debugf("减仓计算: ratio=%s extra=%s usdt=%s base=%s step=%s",
+			formatDecimalFixed(MarginRate.MarginRatio, 4),
+			formatDecimalFixed(extra, 2),
+			formatDecimalFixed(usdt, 2),
+			formatDecimalFixed(Env.ReduceBaseUsdt, 2),
+			formatDecimalFixed(Env.ReduceStepUsdtPerRatioPoint, 2),
+		)
 		tc := TCPositions[symbol]
 		maxCloseValue := tc.USDC.Quantity.Mul(tc.USDC.Price)
 
@@ -197,15 +239,16 @@ func MarginRatioBeyond() {
 
 func MarginRatioSmall() {
 	// 保证金率偏低时，优先给当前总持仓价值最小的币种补仓。
-	log.Println("保证金率偏低，开始补仓处理")
+	logger.Info("保证金率偏低，开始补仓处理")
 	for i := 0; i < Env.MaxAddRounds; i++ {
 		symbol := GetMinValueSymbol()
 		if symbol == "" {
-			log.Println("没有找到适合补仓的币种")
+			logger.Info("没有找到适合补仓的币种")
 			return
 		}
 
-		log.Printf("补仓 当前保证金率 %s%%", formatDecimalFixed(MarginRate.MarginRatio, 4))
+		logger.Infof("补仓 当前保证金率 %s%%", formatDecimalFixed(MarginRate.MarginRatio, 4))
+		logger.Debugf("补仓第 %d/%d 轮", i+1, Env.MaxAddRounds)
 		if MarginRate.MarginRatio.GreaterThan(Env.MarginRatioAddTarget) {
 			if MarginRate.MarginRatio.GreaterThan(Env.MarginRatioReduceTrigger) {
 				MarginRatioBeyond()
@@ -216,7 +259,7 @@ func MarginRatioSmall() {
 
 		symbolConfig := Env.GetSymbol(symbol)
 		if symbolConfig == nil {
-			log.Printf("没有 %s 的配置信息，跳过", symbol)
+			logger.Warnf("没有 %s 的配置信息，跳过", symbol)
 			return
 		}
 
@@ -233,7 +276,7 @@ func MarginRatioSmall() {
 			time.Sleep(Env.TCWaitIntervalDuration)
 			GetTCPositions()
 		case err := <-errCh:
-			log.Printf("组合单执行失败: %v", err)
+			logger.Errorf("组合单执行失败: %v", err)
 			Uh.HandleFilledDelete(tc.ID)
 			time.Sleep(Env.TCWaitIntervalDuration)
 			GetTCPositions()

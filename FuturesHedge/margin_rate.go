@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	"main/logger"
+
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/shopspring/decimal"
 )
@@ -52,11 +54,13 @@ func CalcMarginRatio(ctx context.Context, client *futures.Client, symbol string)
 	if err != nil {
 		return nil, err
 	}
+	logger.Debugf("[保证金率] 获取到 %d 条转换率", len(convMap))
 
 	account, err := client.NewGetAccountV3Service().Do(ctx)
 	if err != nil {
 		return nil, err
 	}
+	logger.Debugf("[保证金率] 账户资产数=%d 持仓数=%d", len(account.Assets), len(account.Positions))
 
 	assetEquity := make(map[string]decimal.Decimal)
 	assetAvailable := make(map[string]decimal.Decimal)
@@ -122,6 +126,8 @@ func CalcMarginRatio(ctx context.Context, client *futures.Client, symbol string)
 			continue
 		}
 
+		logger.Debugf("[保证金率] 处理持仓 %s amt=%s", pos.Symbol, formatDecimalFixed(amt, 4))
+
 		markPrice, err := GetMarkPrice(ctx, client, pos.Symbol)
 		if err != nil {
 			return nil, err
@@ -153,6 +159,8 @@ func CalcMarginRatio(ctx context.Context, client *futures.Client, symbol string)
 			MaintMargin:      maintMargin,
 			AssetEquity:      assetEquity[marginAsset],
 		})
+		logger.Debugf("[保证金率] %s markPrice=%s maintRate=%s maintMargin=%s",
+			pos.Symbol, formatDecimalFixed(markPrice, 6), formatDecimalFixed(maintRate, 6), formatDecimalFixed(maintMargin, 2))
 		totalMaintMargin = totalMaintMargin.Add(maintMargin)
 	}
 
@@ -184,6 +192,13 @@ func CalcMarginRatio(ctx context.Context, client *futures.Client, symbol string)
 		Positions:        posDetails,
 	}
 
+	logger.Debugf("[保证金率] 最终结果: ratio=%s%% equity=%s available=%s maintMargin=%s positions=%d",
+		formatDecimalFixed(m.MarginRatio, 4),
+		formatDecimalFixed(m.TotalEquity, 2),
+		formatDecimalFixed(m.TotalAvailable, 2),
+		formatDecimalFixed(m.TotalMaintMargin, 2),
+		len(m.Positions),
+	)
 	return m, nil
 }
 
@@ -239,7 +254,9 @@ func GetMarkPrice(ctx context.Context, client *futures.Client, symbol string) (d
 	if len(prices) == 0 {
 		return decimal.Zero, errors.New("mark price not found")
 	}
-	return parseDecimal(prices[0].MarkPrice), nil
+	mp := parseDecimal(prices[0].MarkPrice)
+	logger.Debugf("[标记价] %s=%s", symbol, formatDecimalFixed(mp, 6))
+	return mp, nil
 }
 
 func GetMaintMarginRate(ctx context.Context, client *futures.Client, symbol string, markPrice decimal.Decimal) (decimal.Decimal, error) {
@@ -250,7 +267,12 @@ func GetMaintMarginRate(ctx context.Context, client *futures.Client, symbol stri
 			floor := decimalFromFloat(b.NotionalFloor)
 			cap := decimalFromFloat(b.NotionalCap)
 			if notional.GreaterThanOrEqual(floor) && notional.LessThan(cap) {
-				return decimalFromFloat(b.MaintMarginRatio), nil
+				rate := decimalFromFloat(b.MaintMarginRatio)
+				logger.Debugf("[维持保证金率] %s notional=%s bracket=[%s,%s) rate=%s",
+					symbol, formatDecimalFixed(notional, 2),
+					formatDecimalFixed(floor, 2), formatDecimalFixed(cap, 2),
+					formatDecimalFixed(rate, 6))
+				return rate, nil
 			}
 		}
 

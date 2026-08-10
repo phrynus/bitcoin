@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"sync"
 	"time"
+
+	"main/logger"
 
 	"github.com/adshao/go-binance/v2/futures"
 )
@@ -65,6 +65,7 @@ func (uh *UserHandler) Start() (chan struct{}, error) {
 	uh.wg.Add(1)
 	go func() {
 		defer uh.wg.Done()
+		logger.Debug("用户数据流 goroutine 启动")
 		uh.runUserDataStream()
 	}()
 
@@ -86,13 +87,17 @@ func (uh *UserHandler) runUserDataStream() {
 		// ---------- 1. 获取全新的 listenKey ----------
 		listenKey, err := Client.NewStartUserStreamService().Do(context.Background())
 		if err != nil {
-			log.Printf("获取 Listen Key 失败: %v", err)
+			logger.Errorf("获取 Listen Key 失败: %v", err)
 			consecutiveFailures++
-			if !uh.sleepWithStopCheck(backoffDuration(backoffBase, consecutiveFailures, maxBackoff)) {
+			backoff := backoffDuration(backoffBase, consecutiveFailures, maxBackoff)
+			logger.Debugf("获取 Listen Key 失败，第 %d 次，退避 %s", consecutiveFailures, backoff)
+			if !uh.sleepWithStopCheck(backoff) {
 				return
 			}
 			continue
 		}
+
+		logger.Debugf("获取到新 Listen Key: %s", listenKey)
 
 		uh.mu.Lock()
 		uh.ListenKey = listenKey
@@ -107,11 +112,11 @@ func (uh *UserHandler) runUserDataStream() {
 
 		// ---------- 3. 建立 WebSocket 连接 ----------
 		doneC, stopC, err := futures.WsUserDataServe(listenKey, uh.UserHandler, func(err error) {
-			log.Printf("WebSocket 连接异常: %v", err)
+			logger.Errorf("WebSocket 连接异常: %v", err)
 		})
-		fmt.Printf("已获取 Listen Key: %s，正在建立 WebSocket 连接…\n", listenKey)
+		logger.Infof("已获取 Listen Key: %s，正在建立 WebSocket 连接…", listenKey)
 		if err != nil {
-			log.Printf("启动 WebSocket 连接失败: %v", err)
+			logger.Errorf("启动 WebSocket 连接失败: %v", err)
 			// 通知续签goroutine退出
 			uh.cleanupListenKey(listenKey)
 			<-renewDone
@@ -123,8 +128,9 @@ func (uh *UserHandler) runUserDataStream() {
 			continue
 		}
 
-		log.Println("WebSocket 已连接")
+		logger.Info("WebSocket 已连接")
 		consecutiveFailures = 0 // 成功后重置失败计数
+		logger.Debug("WebSocket 连接成功，重置失败计数")
 
 		// ---------- 4. 通知外部"已就绪"（仅首次） ----------
 		uh.mu.Lock()
@@ -137,7 +143,7 @@ func (uh *UserHandler) runUserDataStream() {
 		// ---------- 5. 等待连接断开或收到停止信号 ----------
 		select {
 		case <-doneC:
-			log.Println("WebSocket 连接断开，准备重连…")
+			logger.Info("WebSocket 连接断开，准备重连…")
 			// 清理当前 listenKey
 			uh.cleanupListenKey(listenKey)
 			// 通知续签goroutine退出
@@ -152,7 +158,7 @@ func (uh *UserHandler) runUserDataStream() {
 			}
 
 		case <-uh.stopCh:
-			log.Println("收到停止信号，关闭 WebSocket 连接")
+			logger.Info("收到停止信号，关闭 WebSocket 连接")
 			// 通知WebSocket和续签goroutine停止
 			select {
 			case stopC <- struct{}{}:
@@ -191,7 +197,9 @@ func (uh *UserHandler) cleanupListenKey(listenKey string) {
 		return
 	}
 	if err := Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
-		log.Printf("关闭 Listen Key 失败: %v", err)
+		logger.Errorf("关闭 Listen Key 失败: %v", err)
+	} else {
+		logger.Debugf("Listen Key %s 已关闭", listenKey)
 	}
 	uh.mu.Lock()
 	if uh.ListenKey == listenKey {
@@ -211,7 +219,7 @@ func (uh *UserHandler) renewListenKeyWithStop(listenKey string, interval time.Du
 				return
 			}
 			if err := Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background()); err != nil {
-				log.Printf("续签 Listen Key 失败: %v", err)
+				logger.Errorf("续签 Listen Key 失败: %v", err)
 			}
 		case <-uh.stopCh:
 			return
@@ -246,7 +254,7 @@ func (uh *UserHandler) RenewListenKey(renewInterval time.Duration) {
 			if listenKey != "" {
 				err := Client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background())
 				if err != nil {
-					log.Printf("续签 Listen Key 失败: %v", err)
+					logger.Errorf("续签 Listen Key 失败: %v", err)
 				}
 			}
 		case <-uh.stopCh:
@@ -286,7 +294,7 @@ func (uh *UserHandler) Close() error {
 		// 正常完成等待
 	case <-time.After(10 * time.Second):
 		// 等待超时，记录警告信息
-		log.Println("关闭 UserHandler 超时，可能有未正确关闭的后台任务")
+		logger.Warn("关闭 UserHandler 超时，可能有未正确关闭的后台任务")
 	}
 
 	// 如果有ListenKey，则取消它
@@ -298,7 +306,7 @@ func (uh *UserHandler) Close() error {
 	if listenKey != "" {
 		err := Client.NewCloseUserStreamService().ListenKey(listenKey).Do(context.Background())
 		if err != nil {
-			log.Printf("关闭 Listen Key 时出错: %v", err)
+			logger.Errorf("关闭 Listen Key 时出错: %v", err)
 			return err
 		}
 	}
@@ -308,7 +316,7 @@ func (uh *UserHandler) Close() error {
 
 // UserHandler 处理用户数据事件
 func (uh *UserHandler) UserHandler(event *futures.WsUserDataEvent) {
-	// fmt.Printf("[用户数据流] 收到事件: %s\n", event.Event)
+	logger.Debugf("[用户数据流] 收到事件: %s", event.Event)
 	switch event.Event {
 	case "MARGIN_CALL": // 处理保证金不足通知
 		uh.handleMarginCall(&event.WsUserDataMarginCall)

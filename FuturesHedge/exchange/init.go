@@ -3,14 +3,26 @@ package exchange
 import (
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/phrynus/go-utils/unknown"
 )
 
 // FetchExchangeInfo 从币安 API 获取交易所信息
-func FetchExchangeInfo() (*ExchangeInfo, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
+func FetchExchangeInfo(proxyURL string) (*ExchangeInfo, error) {
+	transport := &http.Transport{}
+	if proxyURL != "" {
+		u, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, err
+		}
+		transport.Proxy = http.ProxyURL(u)
+	}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
 	resp, err := client.Get("https://fapi.binance.com/fapi/v1/exchangeInfo")
 	if err != nil {
 		return nil, err
