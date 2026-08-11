@@ -19,5 +19,5 @@ type WsBalance struct {
 
 // Balance 查询账户余额V2(全部资产)。
 func (w *WsApi) Balance(ctx context.Context) ([]*WsBalance, error) {
-	return Call[[]*WsBalance](w, ctx, "v2/account.balance", nil, true)
+	return Call[[]*WsBalance](w, ctx, "account.balance", nil, true)
 }

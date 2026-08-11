@@ -17,11 +17,8 @@ type SymbolInfo struct {
 	LiquidationFee        string               `json:"liquidationFee"`        // 强平费率
 	MarketTakeBound       string               `json:"marketTakeBound"`       // 市价单限制
 	PriceFilter           *PriceFilter         `json:"priceFilter"`           // 价格过滤器
-	LotSizeFilter         *LotSizeFilter       `json:"lotSizeFilter"`         // 数量过滤器
 	MarketLotSizeFilter   *MarketLotSizeFilter `json:"marketLotSizeFilter"`   // 市价单数量过滤器
-	MaxNumOrdersFilter    *MaxNumOrdersFilter  `json:"maxNumOrdersFilter"`    // 最大订单数过滤器
 	MinNotionalFilter     *MinNotionalFilter   `json:"minNotionalFilter"`     // 最小名义价值过滤器
-	PercentPriceFilter    *PercentPriceFilter  `json:"percentPriceFilter"`    // 百分比价格过滤器
 }
 
 // PriceFilter 价格过滤器
@@ -34,16 +31,6 @@ type PriceFilter struct {
 	TickSizeF float64 `json:"tickSizeF"` // 订单最小价格间隔(float64)
 }
 
-// LotSizeFilter 数量过滤器
-type LotSizeFilter struct {
-	MaxQuantity  string  `json:"maxQty"`    // 最大数量
-	MinQuantity  string  `json:"minQty"`    // 最小数量
-	StepSize     string  `json:"stepSize"`  // 订单最小数量间隔
-	MaxQuantityF float64 `json:"maxQtyF"`   // 最大数量(float64)
-	MinQuantityF float64 `json:"minQtyF"`   // 最小数量(float64)
-	StepSizeF    float64 `json:"stepSizeF"` // 订单最小数量间隔(float64)
-}
-
 // MarketLotSizeFilter 市价单数量过滤器
 type MarketLotSizeFilter struct {
 	MaxQuantity  string  `json:"maxQty"`    // 最大数量
@@ -54,24 +41,8 @@ type MarketLotSizeFilter struct {
 	StepSizeF    float64 `json:"stepSizeF"` // 允许的步进值(float64)
 }
 
-// MaxNumOrdersFilter 最大订单数过滤器
-type MaxNumOrdersFilter struct {
-	Limit    int64 `json:"limit"`    // 订单限制数量
-	LimitI64 int64 `json:"limitI64"` // 订单限制数量(int64)
-}
-
 // MinNotionalFilter 最小名义价值过滤器
 type MinNotionalFilter struct {
 	Notional  string  `json:"notional"`  // 最小名义价值
 	NotionalF float64 `json:"notionalF"` // 最小名义价值(float64)
-}
-
-// PercentPriceFilter 百分比价格过滤器
-type PercentPriceFilter struct {
-	MultiplierDecimal  string  `json:"multiplierDecimal"`  // 乘数小数位数
-	MultiplierUp       string  `json:"multiplierUp"`       // 价格上限百分比
-	MultiplierDown     string  `json:"multiplierDown"`     // 价格下限百分比
-	MultiplierDecimalF float64 `json:"multiplierDecimalF"` // 乘数小数位数(float64)
-	MultiplierUpF      float64 `json:"multiplierUpF"`      // 价格上限百分比(float64)
-	MultiplierDownF    float64 `json:"multiplierDownF"`    // 价格下限百分比(float64)
 }

@@ -31,12 +31,27 @@ func init() {
 
 func main() {
 	defer func() {
+		exc.Close() // 停止交易对信息自动刷新等后台任务
 		exc.WsApi.Close()
 		logger.Close()
 	}()
 
-	balance, _ := exc.WsApi.Depth(context.Background(), "BTCUSDT", 5)
-	logger.Info(balance)
+	// 链式下单(参数直接填文本): 双向持仓开多限价单
+	// 下单时自动(基于 exchange 包内包级 exc.Symbols):
+	//   校验交易对存在 + 修正价格/数量(范围/步长/最小名义价值, 全程精确十进制运算)
+	order, err := exc.WsApi.NewOrder().
+		Symbol("SOLUSDT").
+		Side("BUY").
+		PositionSide("LONG").
+		Type("LIMIT").
+		Usdt("5").
+		Price("52.432523423").
+		DoPlace(context.Background())
+	if err != nil {
+		logger.Errorf("下单失败: %v", err)
+		return
+	}
+	logger.Info(order)
 
 	logger.Info("═══ 关闭项目 ═══")
 	quit := make(chan os.Signal, 1)
