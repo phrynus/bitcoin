@@ -21,8 +21,8 @@ import (
 )
 
 var (
-	ExchangeInfo *exchange.ExchangeInfo
-	Accounts     []*Account
+	Exc      *exchange.Exchange
+	Accounts []*Account
 )
 
 type TCPosition struct {
@@ -67,17 +67,17 @@ func init() {
 	}
 
 	var err error
-	ExchangeInfo, err = exchange.FetchExchangeInfo(env.ProxyURL)
+	Exc, err = exchange.InitExc(env.ProxyURL)
 	if err != nil {
-		fmt.Printf("获取交易所信息失败了: %v", err)
+		fmt.Printf("获取交易所信息失败: %v", err)
 		os.Exit(1)
 	}
 
 	Accounts = make([]*Account, 0, len(env.Accounts))
 	for i, cfg := range env.Accounts {
 		acc := NewAccount(i, &cfg)
-		if err := acc.Client.NewPingService().Do(context.Background()); err != nil {
-			fmt.Printf("账户 %s Ping 失败: %v", acc.Name, err)
+		if err := acc.WsApi.Ping(context.Background()); err != nil {
+			fmt.Printf("账户 %s WS API Ping 失败: %v", acc.Name, err)
 			os.Exit(1)
 		}
 		Accounts = append(Accounts, acc)
@@ -105,7 +105,13 @@ func init() {
 func main() {
 	defer func() {
 		for _, acc := range Accounts {
-			acc.Uh.Close()
+			if acc.Uh != nil {
+				acc.Uh.Close()
+			}
+			acc.WsApi.Close()
+		}
+		if Exc != nil {
+			Exc.Close()
 		}
 		logger.Close()
 	}()

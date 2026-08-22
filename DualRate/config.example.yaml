@@ -6,6 +6,7 @@ symbols:
   - 1000PEPE
   - 1000SHIB
   - AAVE
+  - ADA
   - ARB
   - AVAX
   - BCH
@@ -16,23 +17,26 @@ symbols:
   - CRV
   - DOGE
   - ENA
-  - ETH
   - ETHFI
+  - ETH
   - FIL
   - HBAR
+  - KAIT
   - LINK
   - LTC
   - NEAR
   - NEO
   - ORDI
+  - PENGU
   - PNUT
   - SOL
   - SUI
   - TIA
+  - TRUMP
   - UNI
   - WIF
-  - WLFI
   - WLD
+  - WLFI
   - XRP
 
 days: 730

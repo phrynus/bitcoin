@@ -1,0 +1,45 @@
+# 本地 HTTP 代理（用于访问 Binance）
+proxy_url: "http://127.0.0.1:7897/"
+
+
+# 保证金比率基准点控制
+margin:
+  base: 55              # 目标基准点（减仓收敛目标）
+  range: 5              # 带宽：比率 > base+range 触发减仓，< base-range 触发加仓
+
+# 主循环节奏
+loop:
+  scan_interval: 1m     # 主循环扫描间隔
+  reduce_wait: 5s       # 减仓进行中时的轮询等待间隔
+  step_pause: 1s        # 清理持仓各步骤间停顿
+
+# 加仓规则（保证金比率过低时触发）
+add:
+  min_balance: 10       # 可用余额低于该值不加仓
+  cap_ratio: 1.6        # 持仓价值上限 = cap × cap_ratio
+  timeout: 30s          # 开仓限价单成交等待超时
+
+# 平仓规则（平单边 / 反向 / 规划外对冲对）
+close:
+  timeout: 10s          # 平仓限价单成交等待超时
+  step_usdt: 200        # 分批平仓金额（USDT）
+  step_notional: 240    # 名义价值超过该值时按 step_usdt 分批平，否则一次全平
+
+# 减仓规则（保证金比率过高时触发）
+reduce:
+  step_usdt: 200        # 分批减仓金额（USDT）
+  step_notional: 240    # 名义价值超过该值时按 step_usdt 分批减，否则全减
+  reduce_interval: 1s   # 减仓循环基础间隔：保证金率未超出基准点时，每轮减仓之间的等待时间
+  reduce_cut: 0.1       # 间隔衰减系数（0~1）：保证金率每超出基准 1 个点，等待间隔缩短 base×此值
+
+# 交易账户
+accounts:
+  - name: "主"
+    api_key: ""
+    secret_key: ""
+
+# 加仓规划：每个币构成一个对冲对（USDC 空单 + USDT 多单）
+plans:
+  - symbol: "ARB"       # 基础币
+    usdt: 20            # 单次加仓金额（USDT）
+    cap: 5000           # 该币持仓价值上限（名义价值）

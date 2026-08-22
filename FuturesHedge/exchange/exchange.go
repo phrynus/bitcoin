@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -17,7 +18,6 @@ var (
 type Exchange struct {
 	Client  *futures.Client
 	Symbols map[string]*SymbolInfo
-	WsApi   *WsApi // WS API 客户端(账户/订单操作)
 
 	mu   sync.RWMutex  // 保护 Symbols 的并发读写(后台自动刷新与业务读取)
 	stop chan struct{} // 关闭后台自动刷新 goroutine
@@ -97,6 +97,7 @@ func buildSymbols(info *futures.ExchangeInfo) map[string]*SymbolInfo {
 				LiquidationFee:        symbol.LiquidationFee,
 				MarketTakeBound:       symbol.MarketTakeBound,
 				PriceFilter:           parsePriceFilter(symbol),
+				LotSizeFilter:         parseLotSizeFilter(symbol),
 				MarketLotSizeFilter:   parseMarketLotSizeFilter(symbol),
 				MinNotionalFilter:     parseMinNotionalFilter(symbol),
 			}
@@ -105,27 +106,27 @@ func buildSymbols(info *futures.ExchangeInfo) map[string]*SymbolInfo {
 	return symbols
 }
 
-func RunExc(apiKey, secret, proxy string) (*Exchange, error) {
-	c := &futures.Client{}
+// InitExc 初始化共享的交易所公开元数据(交易对信息), 并启动后台自动刷新。
+// 公开数据与账户密钥无关, 所有账户共享同一份;
+// 各账户再通过 NewWsApi 建立独立的 WS API 客户端(订单/仓位等签名操作)。
+func InitExc(proxy string) (*Exchange, error) {
+	c := futures.NewClient("", "")
 	if proxy != "" {
-		c = futures.NewProxiedClient(apiKey, secret, proxy)
+		c = futures.NewProxiedClient("", "", proxy)
 		futures.SetWsProxyUrl(proxy) // WebSocket 代理需单独设置
-	} else {
-		c = futures.NewClient(apiKey, secret)
 	}
 	if err := c.NewPingService().Do(context.Background()); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("ping 交易所失败: %w", err)
 	}
 
 	info, err := c.NewExchangeInfoService().Do(context.Background())
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("获取交易所信息失败: %w", err)
 	}
 
 	exc = &Exchange{
 		Client:  c,
 		Symbols: buildSymbols(info),
-		WsApi:   NewWsApi(apiKey, secret, proxy),
 		stop:    make(chan struct{}),
 	}
 	// 后台每 4 小时自动刷新一次交易对信息

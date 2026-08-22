@@ -17,6 +17,11 @@ margin_ratio_add_target: 50
 # 最低可用资金（USD）
 min_available_usd: 20
 
+# 不在交易范围内币种的退出金额（USDT/轮）
+# 每轮发现不在 symbols 列表中的持仓币种时，挂单减仓 USDC 该金额，成交后市价平掉对应数量 USDT
+# 0 表示关闭
+orphan_exit_usdt: 100
+
 # 基础降仓金额（USDT）
 reduce_base_usdt: 100
 # 追加降仓金额（USDT / 百分点）

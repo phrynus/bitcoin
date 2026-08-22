@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"main/exchange"
 	"main/logger"
 
 	"github.com/adshao/go-binance/v2/futures"
@@ -17,6 +18,7 @@ type Account struct {
 	Name        string
 	Config      *AccountConfig
 	Client      *futures.Client
+	WsApi       *exchange.WsApi
 	Uh          *UserHandler
 	MarginRate  *MarginRateResult
 	TCPositions map[string]TCPosition
@@ -43,6 +45,8 @@ func NewAccount(index int, cfg *AccountConfig) *Account {
 	} else {
 		a.Client = futures.NewClient(cfg.APIKey, cfg.SecretKey)
 	}
+	// 每账户独立的 WS API 客户端(下单/撤单/仓位查询均走 WS API)
+	a.WsApi = exchange.NewWsApi(cfg.APIKey, cfg.SecretKey, proxy)
 	return a
 }
 
@@ -84,6 +88,9 @@ func (a *Account) runMainLoop() {
 			}
 		}
 
+		// 逐轮退出不在交易范围内的遗留币种(每轮每个币种最多退出一笔)
+		a.CleanupOrphanPositions()
+
 		a.Log.Infof("本轮处理完成，休息 %s", env.MainLoopIntervalDuration.String())
 		time.Sleep(env.MainLoopIntervalDuration)
 
@@ -96,7 +103,7 @@ func (a *Account) runMainLoop() {
 // GetTCPositions 拉取账户保证金率并整理双边持仓。
 func (a *Account) GetTCPositions() {
 	a.Log.Debug("开始获取仓位和保证金率…")
-	result, err := CalcMarginRatio(context.Background(), a.Client, "")
+	result, err := a.CalcMarginRatio(context.Background(), "")
 	if err != nil {
 		a.Log.Errorf("计算保证金率失败: %v", err)
 		return
@@ -106,6 +113,88 @@ func (a *Account) GetTCPositions() {
 	a.Log.Debugf("仓位更新完成: marginRatio=%s%% positions=%d",
 		formatDecimalFixed(result.MarginRatio, 4), len(result.Positions))
 	a.FormatSymbol(result.Positions)
+}
+
+// CleanupOrphanPositions 逐轮退出不在交易范围内的币种:
+// 每轮对每个遗留币种挂限价单减仓 USDC(金额为 orphan_exit_usdt, 不超过剩余仓位),
+// 成交后再市价平掉对应数量的 USDT。orphan_exit_usdt 为 0 时关闭。
+func (a *Account) CleanupOrphanPositions() {
+	env := GetEnv()
+	if !env.OrphanExitUsdt.IsPositive() {
+		return
+	}
+
+	for symbol, pos := range a.TCPositions {
+		if env.GetSymbol(symbol) != nil {
+			continue // 在交易范围内, 跳过
+		}
+		if !pos.USDC.Quantity.IsPositive() && !pos.USDT.Quantity.IsPositive() {
+			continue // 无仓位
+		}
+
+		// 本轮减仓金额 = min(设定金额, USDC 剩余仓位价值)
+		usdt := env.OrphanExitUsdt
+		if usdcValue := pos.USDC.Quantity.Mul(pos.USDC.Price); usdcValue.LessThan(usdt) {
+			usdt = usdcValue
+		}
+
+		if !usdt.IsPositive() {
+			// USDC 已无仓位, 仅剩 USDT: 直接市价平掉
+			if pos.USDT.Quantity.IsPositive() {
+				si, err := getSymbolInfo(symbol + "USDT")
+				if err != nil {
+					a.Log.Errorf("%s 获取 USDT 交易对信息失败: %v", symbol, err)
+					continue
+				}
+				if si.LotSizeFilter != nil {
+					if minQty := parseDecimal(si.LotSizeFilter.MinQuantity); minQty.IsPositive() && pos.USDT.Quantity.LessThan(minQty) {
+						a.Log.Warnf("%s USDT 剩余仓位 %s 低于最小下单数量 %s, 跳过(仅剩粉尘)",
+							symbol, formatDecimalFixed(pos.USDT.Quantity, 4), si.LotSizeFilter.MinQuantity)
+						continue
+					}
+				}
+				q, err := formatQuantity(symbol+"USDT", pos.USDT.Quantity)
+				if err != nil {
+					a.Log.Errorf("格式化 %s USDT 数量失败: %v", symbol, err)
+					continue
+				}
+				a.Log.Infof("%s 不在交易范围内，仅剩 USDT 仓位，市价平掉 %s", symbol, q)
+				a.CloseUSDT(symbol, q)
+			}
+			continue
+		}
+
+		// USDC 剩余仓位低于最小下单数量时无法挂单减仓, 跳过本轮
+		si, err := getSymbolInfo(symbol + "USDC")
+		if err != nil {
+			a.Log.Errorf("%s 获取 USDC 交易对信息失败: %v", symbol, err)
+			continue
+		}
+		if si.LotSizeFilter == nil {
+			a.Log.Errorf("%s 缺少 USDC 数量过滤器", symbol)
+			continue
+		}
+		if minQty := parseDecimal(si.LotSizeFilter.MinQuantity); minQty.IsPositive() && pos.USDC.Quantity.LessThan(minQty) {
+			a.Log.Warnf("%s USDC 剩余仓位 %s 低于最小下单数量 %s, 跳过本轮(仅剩粉尘)",
+				symbol, formatDecimalFixed(pos.USDC.Quantity, 4), si.LotSizeFilter.MinQuantity)
+			continue
+		}
+
+		a.Log.Infof("%s 不在交易范围内，本轮退出 USDC 金额 %s", symbol, formatDecimalFixed(usdt, 2))
+		o := a.NewOrphanExit(symbol, usdt)
+		a.Uh.HandleFilled(o.ID, &o.Handle)
+		doneC, errCh := o.Start()
+		select {
+		case <-doneC:
+			time.Sleep(env.TCWaitIntervalDuration)
+			a.GetTCPositions()
+		case err := <-errCh:
+			a.Log.Errorf("退出 %s 失败: %v", symbol, err)
+			a.Uh.HandleFilledDelete(o.ID)
+			time.Sleep(env.TCWaitIntervalDuration)
+			a.GetTCPositions()
+		}
+	}
 }
 
 // HasSufficientAvailableBalance 计算多币种账户折算后的总可用资金，低于阈值时停止继续下单。

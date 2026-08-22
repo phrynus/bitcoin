@@ -38,3 +38,5 @@ config.yaml
 FuturesHedge/FuturesHedge.zip
 Grid/main1
 app.log
+Force/liquidation_csv
+log

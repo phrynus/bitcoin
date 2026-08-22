@@ -5,75 +5,80 @@ import (
 	"fmt"
 	"time"
 
+	"main/exchange"
 	"main/logger"
 
 	"github.com/shopspring/decimal"
 )
 
-func getFilterDecimalValue(symbol, filterType, key string) (decimal.Decimal, error) {
-	s := ExchangeInfo.Get(symbol)
-	if s == nil {
-		return decimal.Zero, errors.New("symbol not found")
+// getSymbolInfo 从共享的交易所元数据中获取交易对信息(含过滤器)。
+func getSymbolInfo(symbol string) (*exchange.SymbolInfo, error) {
+	if Exc == nil {
+		return nil, errors.New("exchange not initialized")
 	}
-
-	for _, raw := range s.FiltersRaw {
-		if raw["filterType"] != filterType {
-			continue
-		}
-		value, ok := raw[key]
-		if !ok || value == "" {
-			logger.Debugf("filter %s key=%s missing for %s", filterType, key, symbol)
-			return decimal.Zero, fmt.Errorf("missing %s for %s", key, symbol)
-		}
-		v := parseDecimal(value)
-		logger.Debugf("filter %s %s=%s for %s", filterType, key, formatDecimal(v), symbol)
-		return v, nil
+	si, ok := Exc.GetSymbol(symbol)
+	if !ok {
+		return nil, fmt.Errorf("symbol %s not found in exchange info", symbol)
 	}
-
-	return decimal.Zero, fmt.Errorf("missing filter %s for %s", filterType, symbol)
+	return si, nil
 }
 
-// formatQuantityPrice 按交易所精度规则把目标金额换算成合法价格和数量。
+// formatQuantityPrice 按交易所精度规则把目标金额换算成合法价格和数量(限价单)。
+// 价格四舍五入到 tickSize 整数倍, 数量向上取整到 stepSize 整数倍并校验最小名义价值。
 func formatQuantityPrice(symbol string, price, usdt decimal.Decimal) (string, string, error) {
-	s := ExchangeInfo.Get(symbol)
-	if s == nil {
-		return "", "", errors.New("symbol not found")
+	si, err := getSymbolInfo(symbol)
+	if err != nil {
+		return "", "", err
+	}
+	if si.PriceFilter == nil || si.LotSizeFilter == nil {
+		return "", "", fmt.Errorf("symbol %s 缺少价格/数量过滤器", symbol)
 	}
 
-	minPrice, err := getFilterDecimalValue(symbol, "PRICE_FILTER", "minPrice")
-	if err != nil {
-		return "", "", err
-	}
-	maxPrice, err := getFilterDecimalValue(symbol, "PRICE_FILTER", "maxPrice")
-	if err != nil {
-		return "", "", err
-	}
-	if price.LessThan(minPrice) || price.GreaterThan(maxPrice) {
-		return "", "", errors.New("price error")
-	}
-
-	tickSize, err := getFilterDecimalValue(symbol, "PRICE_FILTER", "tickSize")
-	if err != nil {
-		return "", "", err
-	}
-	stepSize, err := getFilterDecimalValue(symbol, "LOT_SIZE", "stepSize")
-	if err != nil {
-		return "", "", err
-	}
-	if tickSize.IsZero() || stepSize.IsZero() {
+	pf := si.PriceFilter
+	lf := si.LotSizeFilter
+	minPrice := parseDecimal(pf.MinPrice)
+	maxPrice := parseDecimal(pf.MaxPrice)
+	tickSize := parseDecimal(pf.TickSize)
+	stepSize := parseDecimal(lf.StepSize)
+	if !tickSize.IsPositive() || !stepSize.IsPositive() {
 		return "", "", errors.New("invalid exchange precision")
+	}
+	if !price.IsPositive() {
+		return "", "", errors.New("price must be positive")
+	}
+	if minPrice.IsPositive() && price.LessThan(minPrice) {
+		return "", "", fmt.Errorf("price %s 小于 MinPrice %s", price, pf.MinPrice)
+	}
+	if maxPrice.IsPositive() && price.GreaterThan(maxPrice) {
+		return "", "", fmt.Errorf("price %s 大于 MaxPrice %s", price, pf.MaxPrice)
 	}
 
 	priceDecimals := decimalPlaces(tickSize)
 	priceTicks := price.Div(tickSize).Round(0)
 	priceValue := priceTicks.Mul(tickSize)
-	if priceValue.IsZero() {
+	if !priceValue.IsPositive() {
 		return "", "", errors.New("price error")
 	}
 
 	quantityDecimals := decimalPlaces(stepSize)
 	quantityTicks := usdt.Div(priceValue).Div(stepSize).Ceil()
 	quantityValue := quantityTicks.Mul(stepSize)
+
+	// 最小名义价值校验: 不足时提高数量(向上取整到 step 的整数倍)
+	if si.MinNotionalFilter != nil {
+		if notional := parseDecimal(si.MinNotionalFilter.Notional); notional.IsPositive() &&
+			priceValue.Mul(quantityValue).LessThan(notional) {
+			quantityValue = notional.Div(priceValue).Div(stepSize).Ceil().Mul(stepSize)
+		}
+	}
+
+	minQuantity := parseDecimal(lf.MinQuantity)
+	if minQuantity.IsPositive() && quantityValue.LessThan(minQuantity) {
+		quantityValue = minQuantity.Div(stepSize).Ceil().Mul(stepSize)
+	}
+	if maxQuantity := parseDecimal(lf.MaxQuantity); maxQuantity.IsPositive() && quantityValue.GreaterThan(maxQuantity) {
+		return "", "", fmt.Errorf("quantity %s 超过 MaxQuantity %s", quantityValue, lf.MaxQuantity)
+	}
 
 	priceStr := trimDecimalString(priceValue.StringFixed(priceDecimals))
 	quantityStr := trimDecimalString(quantityValue.StringFixed(quantityDecimals))
@@ -82,24 +87,35 @@ func formatQuantityPrice(symbol string, price, usdt decimal.Decimal) (string, st
 	return priceStr, quantityStr, nil
 }
 
-// formatQuantity 按交易所步长把数量调整为可下单值。
+// formatQuantity 按交易所步长把数量调整为可下单值(向上取整到 stepSize 整数倍)。
 func formatQuantity(symbol string, quantity decimal.Decimal) (string, error) {
-	s := ExchangeInfo.Get(symbol)
-	if s == nil {
-		return "", errors.New("symbol not found")
-	}
-
-	stepSize, err := getFilterDecimalValue(symbol, "LOT_SIZE", "stepSize")
+	si, err := getSymbolInfo(symbol)
 	if err != nil {
 		return "", err
 	}
-	if stepSize.IsZero() {
+	if si.LotSizeFilter == nil {
+		return "", fmt.Errorf("symbol %s 缺少数量过滤器", symbol)
+	}
+
+	lf := si.LotSizeFilter
+	stepSize := parseDecimal(lf.StepSize)
+	if !stepSize.IsPositive() {
 		return "", errors.New("invalid exchange precision")
+	}
+	if quantity.IsNegative() {
+		quantity = quantity.Neg()
 	}
 
 	quantityDecimals := decimalPlaces(stepSize)
 	quantityTicks := quantity.Div(stepSize).Ceil()
 	quantityValue := quantityTicks.Mul(stepSize)
+	if minQuantity := parseDecimal(lf.MinQuantity); minQuantity.IsPositive() && quantityValue.LessThan(minQuantity) {
+		quantityValue = minQuantity.Div(stepSize).Ceil().Mul(stepSize)
+	}
+	if maxQuantity := parseDecimal(lf.MaxQuantity); maxQuantity.IsPositive() && quantityValue.GreaterThan(maxQuantity) {
+		return "", fmt.Errorf("quantity %s 超过 MaxQuantity %s", quantityValue, lf.MaxQuantity)
+	}
+
 	quantityStr := trimDecimalString(quantityValue.StringFixed(quantityDecimals))
 	logger.Debugf("数量格式化: %s step=%s quantity=%s", symbol, formatDecimal(stepSize), quantityStr)
 	return quantityStr, nil

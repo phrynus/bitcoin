@@ -31,6 +31,7 @@ type EnvConfig struct {
 	MarginRatioReduceTarget        decimal.Decimal `yaml:"margin_ratio_reduce_target"`       // 降仓目标保证金率
 	MarginRatioAddTarget           decimal.Decimal `yaml:"margin_ratio_add_target"`          // 加仓目标保证金率
 	MinAvailableUSD                decimal.Decimal `yaml:"min_available_usd"`                // 最低可用美元
+	OrphanExitUsdt                 decimal.Decimal `yaml:"orphan_exit_usdt"`                 // 不在交易范围内币种每轮退出 USDC 的 USDT 金额(0 关闭)
 	ReduceBaseUsdt                 decimal.Decimal `yaml:"reduce_base_usdt"`                 // 基础降仓金额
 	ReduceStepUsdtPerRatioPoint    decimal.Decimal `yaml:"reduce_step_usdt_per_ratio_point"` // 每点保证金率追加降仓金额
 	MainLoopInterval               string          `yaml:"main_loop_interval"`               // 主循环间隔
@@ -144,6 +145,9 @@ func (e *EnvConfig) applyDefaults() error {
 	}
 	if e.MinAvailableUSD.IsZero() {
 		e.MinAvailableUSD = defaultMinAvailableUSD
+	}
+	if e.OrphanExitUsdt.IsNegative() {
+		e.OrphanExitUsdt = decimal.Zero
 	}
 	if e.ReduceBaseUsdt.IsZero() {
 		e.ReduceBaseUsdt = defaultReduceBaseUsdt
