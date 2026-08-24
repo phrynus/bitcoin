@@ -59,6 +59,12 @@ type ReduceRule struct {
 	Cut          float64       `yaml:"reduce_cut"`      // 间隔衰减系数（0~1）：每超出基准 1 点缩短 base×此值；此值×超出点数≥1 连续减仓
 }
 
+// OverRule 超上限减仓规则（持仓价值超过 cap × ratio 时触发，参数独立）。
+type OverRule struct {
+	Ratio    float64 `yaml:"ratio"`     // 触发倍数：持仓价值 > cap × ratio 时减仓
+	StepUsdt string  `yaml:"step_usdt"` // 单次减仓金额（USDT），固定金额减仓不判断大小
+}
+
 // Config 顶层配置。
 type Config struct {
 	ProxyURL string     `yaml:"proxy_url"` // 本地 HTTP 代理
@@ -67,6 +73,7 @@ type Config struct {
 	Add      AddRule    `yaml:"add"`       // 加仓规则
 	Close    CloseRule  `yaml:"close"`     // 平仓规则
 	Reduce   ReduceRule `yaml:"reduce"`    // 减仓规则
+	Over     OverRule   `yaml:"over"`      // 超上限减仓规则
 	Accounts []Account  `yaml:"accounts"`  // 交易账户
 	Plans    []Plan     `yaml:"plans"`     // 加仓规划
 }
@@ -168,6 +175,14 @@ func (c *Config) defaults() error {
 	}
 	if c.Reduce.StepUsdt == "" {
 		c.Reduce.StepUsdt = "200"
+	}
+
+	// 超上限减仓规则
+	if c.Over.Ratio <= 0 {
+		c.Over.Ratio = 1.9
+	}
+	if c.Over.StepUsdt == "" {
+		c.Over.StepUsdt = "100"
 	}
 	return nil
 }

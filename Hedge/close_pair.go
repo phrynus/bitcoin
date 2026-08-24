@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"sync"
 
 	"main/exchange"
 
@@ -13,6 +14,8 @@ import (
 // CloseIrregular 平异常对冲对，分两类：
 //   - 反向对冲对（USDC 多 + USDT 空）：与开仓方向相反，一律平掉 → closeInverted
 //   - 正向对冲对（USDC 空 + USDT 多）但不在规划（plans）内：规划外持仓，平掉 → closePair
+//
+// 内部并发执行所有平仓任务，并等待全部完成后再返回。
 func (h *hedge) CloseIrregular(positions map[string]*pos) {
 
 	// 规划内的币（其正向对冲对保留）
@@ -21,12 +24,18 @@ func (h *hedge) CloseIrregular(positions map[string]*pos) {
 		kept[p.Base] = true
 	}
 
+	// 并发平掉所有异常对冲对，等待全部线程执行完毕
+	var wg sync.WaitGroup
 	for base, p := range positions {
 		switch {
 		case p.usdc.qty != 0 && p.usdc.side == "LONG" && p.usdt.qty != 0 && p.usdt.side == "SHORT":
 			// 反向对冲对：一律平掉
 			h.log.Warnf("平异常: %s 为反向对冲对(USDC多+USDT空)，平掉", base)
-			h.closeInverted(base, p)
+			wg.Add(1)
+			go func(base string, p *pos) {
+				defer wg.Done()
+				h.closeInverted(base, p)
+			}(base, p)
 		case p.usdc.qty != 0 && p.usdc.side == "SHORT" && p.usdt.qty != 0 && p.usdt.side == "LONG":
 			// 规划内的正向对冲对保留
 			if kept[base] {
@@ -34,9 +43,14 @@ func (h *hedge) CloseIrregular(positions map[string]*pos) {
 			}
 			// 规划外正向对冲对：平掉
 			h.log.Warnf("平异常: %s 为规划外正向对冲对，平掉", base)
-			h.closePair(base, p)
+			wg.Add(1)
+			go func(base string, p *pos) {
+				defer wg.Done()
+				h.closePair(base, p)
+			}(base, p)
 		}
 	}
+	wg.Wait()
 }
 
 // closePair 平正向对冲对（规划外）：
@@ -62,7 +76,7 @@ func (h *hedge) closePair(base string, p *pos) {
 	}
 
 	// 取卖盘第二档价作为限价（平仓 BUY → Ask，与开仓相反）
-	price, err := h.depthLevel(usdc, true)
+	price, err := h.depthLevel(usdc, false)
 	if err != nil {
 		h.log.Errorf("平异常: 获取 %s 盘口失败: %v", usdc, err)
 		return
@@ -138,7 +152,7 @@ func (h *hedge) closeInverted(base string, p *pos) {
 	}
 
 	// 取买盘第二档价作为限价（平仓 SELL → Bid，与开仓相反）
-	price, err := h.depthLevel(usdc, false)
+	price, err := h.depthLevel(usdc, true)
 	if err != nil {
 		h.log.Errorf("平异常: 获取 %s 盘口失败: %v", usdc, err)
 		return

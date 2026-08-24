@@ -46,14 +46,6 @@ func (h *hedge) RebalanceLoop() {
 			continue
 		}
 
-		// 可用余额不足 → 不加仓
-		if s.balance <= cfg.Add.MinBalance {
-			h.log.Warnf("加仓: 可用余额 %.4f 低于下限 %.4f，跳过加仓", s.balance, cfg.Add.MinBalance)
-			continue
-		}
-
-		// 比率正常 → 维护持仓健康：
-		h.log.Infof("保证金率 %.2f%% 处于正常区间，维护持仓健康(持仓对数=%d)", s.margin, len(s.positions))
 		// 1) 平衡对冲对两边数量
 		h.Balance(s.positions)
 		time.Sleep(cfg.Loop.StepPause)
@@ -62,6 +54,14 @@ func (h *hedge) RebalanceLoop() {
 		time.Sleep(cfg.Loop.StepPause)
 		// 3) 平掉反向 / 规划外对冲对
 		h.CloseIrregular(s.positions)
+		// 4) 超上限减仓
+		h.ReduceOverCap(s.positions)
+
+		// 可用余额不足 → 不加仓
+		if s.balance <= cfg.Add.MinBalance {
+			h.log.Warnf("加仓: 可用余额 %.4f 低于下限 %.4f，跳过加仓", s.balance, cfg.Add.MinBalance)
+			continue
+		}
 
 		// 再次快照，保证金比率过低 → 加仓（开一对新对冲）
 		s2, err := h.Snap()
@@ -96,9 +96,9 @@ func (h *hedge) RebalanceLoop() {
 			time.Sleep(cfg.Loop.StepPause)
 			// 2) 平掉单边持仓（对冲失效的残余腿）
 			h.CloseOneLeg(s3.positions)
-			time.Sleep(cfg.Loop.StepPause)
-			// 3) 平掉反向 / 规划外对冲对
-			h.CloseIrregular(s3.positions)
+			// time.Sleep(cfg.Loop.StepPause)
+			// // 3) 平掉反向 / 规划外对冲对
+			// h.CloseIrregular(s3.positions)
 
 		} else {
 			h.log.Infof("保证金率 %.2f%% 无需加仓", s2.margin)

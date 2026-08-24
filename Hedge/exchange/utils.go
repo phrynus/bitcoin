@@ -1,15 +1,20 @@
 package exchange
 
 import (
-	"strconv"
-	"time"
+	"strings"
 
 	"github.com/adshao/go-binance/v2/futures"
+	"github.com/google/uuid"
 	"github.com/phrynus/go-utils/unknown"
 )
 
+// GenID 基于 UUID v4 生成全局唯一的 clientOrderID（去连字符）。
+// ⚠️ 曾手写"时间戳+原子计数"，早期版本甚至只依赖 time.Now().UnixNano()，
+// 多个 goroutine 落在同一纳秒时生成重复 ID，导致订阅 map 覆盖、成交事件匹配不到而卡死。
+// 改用 google/uuid（UUID v4，122 位随机熵）后不再有并发重复风险。
 func GenID() string {
-	return "g" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	// UUID v4 去连字符（32 字符十六进制），加 "g" 前缀共 33 字符 < Binance clientOrderID 36 上限
+	return "g" + strings.ReplaceAll(uuid.NewString(), "-", "")
 }
 
 func ToString(data any) string {

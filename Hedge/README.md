@@ -159,6 +159,8 @@ sequenceDiagram
 
 **触发**：主循环健康维护阶段。
 
+> 内部将待平仓的所有对冲对**并发**启动平仓任务，并通过 `WaitGroup` **等待全部完成**后再返回。
+
 **对象与处理**：
 
 | 持仓形态 | 判定 | 处理 |
@@ -179,7 +181,7 @@ sequenceDiagram
 3. 成交回调内 **市价 BUY** 平等量 USDT 空单；
 4. 超时撤销挂单。
 
-> 挂限价单 + 订阅成交的流程为**同步**执行（阻塞等待成交/超时，确保平对完成再返回）；纯市价流（closeLeg / balancePair / reducePair）为**异步**执行。
+> 挂限价单 + 订阅成交的流程为**同步**执行（阻塞等待成交/超时，确保平对完成再返回）；`CloseIrregular` 内部把多个平仓任务**并发**启动，并等待全部完成。纯市价流（closeLeg / balancePair / reducePair）为**异步**执行。
 
 ---
 
@@ -218,7 +220,8 @@ Subscribe(clientOrderID, status, 成交回调, 超时, 超时回调) → done ch
 
 | 流类型 | 处理 |
 |--------|------|
-| 挂限价单 + 订阅成交（openPair / closePair / closeInverted） | 同步，阻塞等成交 |
+| 加仓开对（openPair） | 同步，阻塞等成交 |
+| 平异常对冲对（closePair / closeInverted） | `CloseIrregular` 并发启动多个，各自阻塞等成交，整体 `WaitGroup` 等待全部完成 |
 | 纯市价流（closeLeg / balancePair / reducePair） | `go` 异步 |
 | 独立减仓线程 `reduceToTarget` | `go` 异步，主循环等待 |
 

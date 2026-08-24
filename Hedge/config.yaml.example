@@ -1,5 +1,5 @@
 # 本地 HTTP 代理（用于访问 Binance）
-proxy_url: "http://127.0.0.1:7897/"
+proxy_url: ""
 
 
 # 保证金比率基准点控制
@@ -31,6 +31,11 @@ reduce:
   step_notional: 240    # 名义价值超过该值时按 step_usdt 分批减，否则全减
   reduce_interval: 1s   # 减仓循环基础间隔：保证金率未超出基准点时，每轮减仓之间的等待时间
   reduce_cut: 0.1       # 间隔衰减系数（0~1）：保证金率每超出基准 1 个点，等待间隔缩短 base×此值
+
+# 超上限减仓规则（持仓价值超过 cap × ratio 时触发）
+over:
+  ratio: 1.9            # 触发倍数：持仓价值 > cap × ratio 时减仓
+  step_usdt: 100        # 单次减仓金额（USDT），固定金额不判断大小
 
 # 交易账户
 accounts:

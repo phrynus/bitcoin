@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/adshao/go-binance/v2 v2.8.12
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/phrynus/go-utils v1.7.0
 	github.com/shopspring/decimal v1.4.0
@@ -27,7 +28,6 @@ require (
 	github.com/gofiber/fiber/v3 v3.5.0 // indirect
 	github.com/gofiber/schema v1.8.3 // indirect
 	github.com/gofiber/utils/v2 v2.4.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
