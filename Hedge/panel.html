@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hedge 对冲面板</title>
+<style>
+:root {
+  --bg: #0f1115;
+  --card: #161a22;
+  --border: #262c38;
+  --text: #e6e9ef;
+  --muted: #8b93a3;
+  --accent: #4f8cff;
+  --pos: #2ecc71;
+  --neg: #ff5c5c;
+  --warn: #f5a623;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+}
+.brand h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
+.brand .sub { color: var(--muted); font-size: 12px; margin-left: 10px; }
+.meta { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+.badge { border: 1px solid var(--border); border-radius: 20px; padding: 2px 10px; color: var(--accent); }
+main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.card-head h2 { font-size: 15px; font-weight: 600; }
+.card-head .updated { margin-left: auto; color: var(--muted); font-size: 12px; }
+.accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
+.account .card-head h2 { font-size: 16px; }
+.tag { font-size: 11px; padding: 1px 8px; border-radius: 20px; border: 1px solid; }
+.tag.ok { color: var(--pos); border-color: var(--pos); }
+.tag.warn { color: var(--warn); border-color: var(--warn); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat .label { color: var(--muted); font-size: 12px; }
+.stat .value { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat .value small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.acc-title { font-size: 13px; color: var(--muted); font-weight: 500; margin: 14px 0 8px; }
+.acc-title:first-of-type { margin-top: 0; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--muted); font-size: 12px; font-weight: 500; }
+tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+td.base { font-weight: 600; }
+td.num { text-align: right; }
+tr.pair-sum td { background: rgba(79, 140, 255, 0.06); font-weight: 600; }
+tr.pair-sum td.base { color: var(--accent); }
+.side { display: inline-block; min-width: 18px; text-align: center; font-size: 11px; border-radius: 4px; padding: 0 4px; margin-right: 6px; }
+.side.long { color: var(--pos); background: rgba(46, 204, 113, 0.12); }
+.side.short { color: var(--neg); background: rgba(255, 92, 92, 0.12); }
+.pos { color: var(--pos); }
+.neg { color: var(--neg); }
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.cfg-item { display: flex; flex-direction: column; gap: 2px; }
+.cfg-item .label { color: var(--muted); font-size: 12px; }
+.cfg-item .value { font-size: 15px; font-weight: 600; }
+.cfg-item .value small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.plans { display: flex; flex-wrap: wrap; gap: 8px; }
+.plan { border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 13px; font-weight: 600; }
+.plan small { font-weight: 400; color: var(--muted); font-size: 11px; margin-left: 4px; }
+.empty { color: var(--muted); text-align: center; padding: 24px 0; }
+footer { max-width: 1280px; margin: 0 auto; padding: 0 24px 24px; color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .brand .sub { display: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Hedge 对冲面板</h1>
+    <span class="sub">USDC 空 + USDT 多 · 保证金率收敛</span>
+  </div>
+  <div class="meta">
+    <span>数据留存时间: {{ .UpdatedAt | time }}</span>
+  </div>
+</header>
+
+<main>
+  <!-- 账户概览 -->
+  <section class="accounts">
+    {{ range .Accounts }}
+    <div class="card account">
+      <div class="card-head">
+        <h2>{{ .Name }}</h2>
+        {{ if .Reducing }}<span class="tag warn">减仓中</span>{{ else }}<span class="tag ok">运行中</span>{{ end }}
+        <span class="updated">更新于 {{ .UpdatedAt | time }}</span>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <span class="label">可用余额</span>
+          <span class="value">{{ .Balance | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">钱包余额</span>
+          <span class="value">{{ .Wallet | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">未实现盈亏</span>
+          <span class="value {{ if lt .Pnl 0.0 }}neg{{ else }}pos{{ end }}">{{ .Pnl | sign }}{{ .Pnl | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">保证金率</span>
+          <span class="value">{{ .Margin | wan | fmt 2 }} <small>({{ .Margin | pct }})</small></span>
+        </div>
+        <div class="stat">
+          <span class="label">维持保证金</span>
+          <span class="value">{{ .Maint | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">保证金余额</span>
+          <span class="value">{{ .MarginBal | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">初始保证金</span>
+          <span class="value">{{ .InitMargin | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">持仓初始保证金</span>
+          <span class="value">{{ .PosInitM | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">挂单初始保证金</span>
+          <span class="value">{{ .OpenInitM | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">最大可提现</span>
+          <span class="value">{{ .MaxWithdraw | fmt 4 }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">持仓对数</span>
+          <span class="value">{{ len .Positions }}</span>
+        </div>
+      </div>
+    </div>
+    {{ else }}
+    <div class="empty">暂无留存数据，等待机器人首次快照…</div>
+    {{ end }}
+  </section>
+
+  <!-- 持仓明细 -->
+  <section class="card">
+    <div class="card-head"><h2>持仓明细</h2></div>
+    {{ range .Accounts }}
+    <h3 class="acc-title">{{ .Name }}</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>币种</th>
+            <th>腿</th>
+            <th>方向</th>
+            <th>数量</th>
+            <th>名义价值</th>
+            <th>开仓价</th>
+            <th>标记价</th>
+            <th>强平价</th>
+            <th>保本价</th>
+            <th>未实现盈亏</th>
+            <th>初始保证金</th>
+            <th>维持保证金</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range $base, $p := .Positions }}
+          <tr class="pair-sum">
+            <td class="base">{{ $base }}</td>
+            <td colspan="8">对冲对合计</td>
+            <td class="num">{{ $p.Value | fmt 2 }}</td>
+            <td class="num {{ if lt $p.Pnl 0.0 }}neg{{ else }}pos{{ end }}">{{ $p.Pnl | sign }}{{ $p.Pnl | fmt 4 }}</td>
+            <td colspan="2"></td>
+          </tr>
+          <tr>
+            <td></td>
+            <td>USDC</td>
+            <td><span class="side {{ if eq $p.Usdc.Side "SHORT" }}short{{ else }}long{{ end }}">{{ $p.Usdc.Side | side }}</span></td>
+            <td>{{ $p.Usdc.Qty | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdc.Value | fmtz 2 }}</td>
+            <td class="num">{{ $p.Usdc.Entry | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdc.Mark | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdc.Liq | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdc.BreakEven | fmtz 6 }}</td>
+            <td class="num {{ if lt $p.Usdc.Pnl 0.0 }}neg{{ else }}pos{{ end }}">{{ $p.Usdc.Pnl | sign }}{{ $p.Usdc.Pnl | fmt 4 }}</td>
+            <td class="num">{{ $p.Usdc.InitM | fmtz 2 }}</td>
+            <td class="num">{{ $p.Usdc.MaintM | fmtz 2 }}</td>
+          </tr>
+          <tr>
+            <td></td>
+            <td>USDT</td>
+            <td><span class="side {{ if eq $p.Usdt.Side "LONG" }}long{{ else }}short{{ end }}">{{ $p.Usdt.Side | side }}</span></td>
+            <td>{{ $p.Usdt.Qty | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdt.Value | fmtz 2 }}</td>
+            <td class="num">{{ $p.Usdt.Entry | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdt.Mark | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdt.Liq | fmtz 6 }}</td>
+            <td class="num">{{ $p.Usdt.BreakEven | fmtz 6 }}</td>
+            <td class="num {{ if lt $p.Usdt.Pnl 0.0 }}neg{{ else }}pos{{ end }}">{{ $p.Usdt.Pnl | sign }}{{ $p.Usdt.Pnl | fmt 4 }}</td>
+            <td class="num">{{ $p.Usdt.InitM | fmtz 2 }}</td>
+            <td class="num">{{ $p.Usdt.MaintM | fmtz 2 }}</td>
+          </tr>
+          {{ else }}
+          <tr><td colspan="12" class="empty">无持仓</td></tr>
+          {{ end }}
+        </tbody>
+      </table>
+    </div>
+    {{ end }}
+  </section>
+
+  <!-- 运行配置 -->
+  <section class="card">
+    <div class="card-head"><h2>运行配置</h2></div>
+    <div class="cfg-grid">
+      <div class="cfg-item">
+        <span class="label">保证金基准点</span>
+        <span class="value">{{ .Config.Margin.Base | fmt 2 }} <small>万分比</small></span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">带宽</span>
+        <span class="value">±{{ .Config.Margin.Range | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">减仓阈值</span>
+        <span class="value">{{ add .Config.Margin.Base .Config.Margin.Range | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">加仓阈值</span>
+        <span class="value">{{ sub .Config.Margin.Base .Config.Margin.Range | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">扫描间隔</span>
+        <span class="value">{{ .Config.Loop.ScanInterval }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">减仓轮询间隔</span>
+        <span class="value">{{ .Config.Loop.ReduceWait }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">步骤停顿</span>
+        <span class="value">{{ .Config.Loop.StepPause }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">余额下限</span>
+        <span class="value">{{ .Config.Add.MinBalance | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">加仓上限倍数</span>
+        <span class="value">{{ .Config.Add.CapRatio | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">开仓超时</span>
+        <span class="value">{{ .Config.Add.Timeout }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">平仓超时</span>
+        <span class="value">{{ .Config.Close.Timeout }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">分批平仓额</span>
+        <span class="value">{{ .Config.Close.StepUsdt }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">分批平仓阈值</span>
+        <span class="value">{{ .Config.Close.StepNotional | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">分批减仓额</span>
+        <span class="value">{{ .Config.Reduce.StepUsdt }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">分批减仓阈值</span>
+        <span class="value">{{ .Config.Reduce.StepNotional | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">减仓基础间隔</span>
+        <span class="value">{{ .Config.Reduce.Interval }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">间隔衰减系数</span>
+        <span class="value">{{ .Config.Reduce.Cut | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">超上限倍数</span>
+        <span class="value">{{ .Config.Over.Ratio | fmt 2 }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">超上限减仓额</span>
+        <span class="value">{{ .Config.Over.StepUsdt }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">面板地址</span>
+        <span class="value">{{ .Config.Panel.Addr }}</span>
+      </div>
+      <div class="cfg-item">
+        <span class="label">交易账户</span>
+        <span class="value">{{ range .Config.Accounts }}{{ .Name }} {{ end }}</span>
+      </div>
+    </div>
+    <h3 class="acc-title">规划币种</h3>
+    <div class="plans">
+      {{ range .Config.Plans }}
+      <span class="plan">{{ .Base }} <small>单次 {{ .Usdt | fmt 2 }} · 上限 {{ .Cap | fmt 0 }}</small></span>
+      {{ end }}
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>数据来源: 内存留存（机器人每次快照自动更新）· 页面不主动请求交易所 · 手动刷新浏览器查看最新</span>
+</footer>
+</body>
+</html>

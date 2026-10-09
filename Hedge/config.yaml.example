@@ -37,6 +37,10 @@ over:
   ratio: 1.9            # 触发倍数：持仓价值 > cap × ratio 时减仓
   step_usdt: 100        # 单次减仓金额（USDT），固定金额不判断大小
 
+# 信息面板（只读留存数据，不主动拉取交易所）
+panel:
+  addr: ":8080"         # HTTP 监听地址，浏览器访问 http://localhost:8080
+
 # 交易账户
 accounts:
   - name: "主"

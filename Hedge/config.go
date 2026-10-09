@@ -65,6 +65,11 @@ type OverRule struct {
 	StepUsdt string  `yaml:"step_usdt"` // 单次减仓金额（USDT），固定金额减仓不判断大小
 }
 
+// PanelRule 信息面板配置。
+type PanelRule struct {
+	Addr string `yaml:"addr"` // HTTP 监听地址（如 :8080）
+}
+
 // Config 顶层配置。
 type Config struct {
 	ProxyURL string     `yaml:"proxy_url"` // 本地 HTTP 代理
@@ -74,6 +79,7 @@ type Config struct {
 	Close    CloseRule  `yaml:"close"`     // 平仓规则
 	Reduce   ReduceRule `yaml:"reduce"`    // 减仓规则
 	Over     OverRule   `yaml:"over"`      // 超上限减仓规则
+	Panel    PanelRule  `yaml:"panel"`     // 信息面板
 	Accounts []Account  `yaml:"accounts"`  // 交易账户
 	Plans    []Plan     `yaml:"plans"`     // 加仓规划
 }
@@ -183,6 +189,11 @@ func (c *Config) defaults() error {
 	}
 	if c.Over.StepUsdt == "" {
 		c.Over.StepUsdt = "100"
+	}
+
+	// 信息面板
+	if c.Panel.Addr == "" {
+		c.Panel.Addr = ":8080"
 	}
 	return nil
 }

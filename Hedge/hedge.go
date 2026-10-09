@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"main/exchange"
 
@@ -27,6 +28,9 @@ type hedge struct {
 
 	reduceMu sync.Mutex // 保护 reducing 的并发访问
 	reducing bool       // 是否正在独立减仓（期间主循环等待，避免并发下单）
+
+	priceMu   sync.Mutex // 保护价格明细节流刷新
+	lastPrice time.Time  // 上次刷新价格明细的时间
 }
 
 // newHedge 创建对冲机器人实例并建立连接。
@@ -68,6 +72,14 @@ type leg struct {
 	value float64 // 名义价值
 	pnl   float64 // 未实现盈亏
 	side  string  // 持仓方向（LONG / SHORT）
+
+	// 价格与保证金明细（来自 v2/account.position，节流刷新）
+	entry     float64 // 开仓价
+	mark      float64 // 标记价
+	liq       float64 // 强平价
+	breakEven float64 // 保本价
+	initM     float64 // 初始保证金
+	maintM    float64 // 维持保证金
 }
 
 // pos 一个币的对冲对持仓（USDC 腿 + USDT 腿）。
@@ -78,12 +90,19 @@ type pos struct {
 	usdc  leg
 }
 
-// snap 账户快照：可用余额、保证金比率与全部持仓。
+// snap 账户快照：余额、保证金明细与全部持仓。
 type snap struct {
-	balance   float64         // 可用余额
-	pnl       float64         // 未实现盈亏
-	margin    float64         // 保证金比率（万分比，55 = 0.55%）
-	positions map[string]*pos // 按基础币聚合的对冲对持仓
+	balance     float64         // 可用余额
+	pnl         float64         // 未实现盈亏
+	margin      float64         // 保证金比率（百分比，0.55 = 0.55%）
+	wallet      float64         // 钱包余额
+	maint       float64         // 维持保证金
+	marginBal   float64         // 保证金余额
+	initMargin  float64         // 初始保证金
+	posInitM    float64         // 持仓初始保证金
+	openInitM   float64         // 挂单初始保证金
+	maxWithdraw float64         // 最大可提现
+	positions   map[string]*pos // 按基础币聚合的对冲对持仓
 }
 
 // Snap 拉取账户数据生成快照，供主循环判断加仓 / 减仓 / 清理。
@@ -98,7 +117,14 @@ func (h *hedge) Snap() (*snap, error) {
 
 	s.balance = absf(acc.AvailableBalance)
 	s.pnl = tof(acc.TotalUnrealizedProfit)
-	// 保证金比率 = 维持保证金 / 钱包余额 × 10000（万分比）
+	s.wallet = absf(acc.TotalWalletBalance)
+	s.maint = absf(acc.TotalMaintMargin)
+	s.marginBal = absf(acc.TotalMarginBalance)
+	s.initMargin = absf(acc.TotalInitialMargin)
+	s.posInitM = absf(acc.TotalPositionInitialMargin)
+	s.openInitM = absf(acc.TotalOpenOrderInitialMargin)
+	s.maxWithdraw = absf(acc.MaxWithdrawAmount)
+	// 保证金比率 = 维持保证金 / 钱包余额 × 100（百分比）
 	if wb := absf(acc.TotalWalletBalance); wb > 0 {
 		s.margin = absf(acc.TotalMaintMargin) / wb * 100
 	}
@@ -134,9 +160,51 @@ func (h *hedge) Snap() (*snap, error) {
 		}
 	}
 
+	// 补充各腿价格与保证金明细（节流刷新，失败不影响主流程）
+	h.enrichPrices(s)
+
+	// 留存快照数据到面板（供网页展示，不触发额外请求）
+	panel.Update(h.name, s, h.isReducing())
+
 	h.log.Infof("快照完成: 可用余额=%.4f 未实现盈亏=%.4f 保证金率=%.2f%% 持仓对数=%d",
 		s.balance, s.pnl, s.margin, len(s.positions))
 	return s, nil
+}
+
+// enrichPrices 用 v2/account.position 补充各腿的开仓价 / 标记价 / 强平价 / 保本价 / 保证金明细。
+// 节流刷新（30s 一次），避免频繁请求；失败仅告警，不影响主流程。
+func (h *hedge) enrichPrices(s *snap) {
+	h.priceMu.Lock()
+	defer h.priceMu.Unlock()
+	if time.Since(h.lastPrice) < 30*time.Second {
+		return
+	}
+	ps, err := h.ws.Position(context.Background(), "")
+	if err != nil {
+		h.log.Warnf("补充持仓价格明细失败: %v", err)
+		return
+	}
+	h.lastPrice = time.Now()
+	for _, pt := range ps {
+		if absf(pt.PositionAmt) == 0 {
+			continue
+		}
+		base := strings.TrimSuffix(strings.TrimSuffix(pt.Symbol, "USDC"), "USDT")
+		p := s.positions[base]
+		if p == nil {
+			continue
+		}
+		lp := &p.usdc
+		if strings.HasSuffix(pt.Symbol, "USDT") {
+			lp = &p.usdt
+		}
+		lp.entry = tof(pt.EntryPrice)
+		lp.mark = tof(pt.MarkPrice)
+		lp.liq = tof(pt.LiquidationPrice)
+		lp.breakEven = tof(pt.BreakEvenPrice)
+		lp.initM = tof(pt.InitialMargin)
+		lp.maintM = tof(pt.MaintMargin)
+	}
 }
 
 // tof 字符串转 float64（解析失败返回 0）。

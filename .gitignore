@@ -41,3 +41,8 @@ app.log
 Force/liquidation_csv
 log
 DualRate/okx
+Maker
+Grid/data.db*
+*.log
+*.sum
+Grid/main.go

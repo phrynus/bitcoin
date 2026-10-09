@@ -51,6 +51,9 @@ func main() {
 		plog.Infof("所有连接已关闭，程序退出")
 	}()
 
+	// 启动信息面板（只读留存数据，不主动拉取交易所）
+	go StartWebServer(cfg.Panel.Addr)
+
 	// 逐个启动各账户主循环（间隔 10s，避免同时发起大量请求）
 	for _, a := range cfg.Accounts {
 		bot := bots[a.Name]

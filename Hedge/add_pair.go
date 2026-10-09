@@ -17,9 +17,10 @@ func (h *hedge) AddPair(s *snap) {
 		return
 	}
 
-	// 挑选规划中当前持仓价值最小的币
+	// 挑选规划中“当前持仓价值 / 各自 cap”比例最小的币
 	var pick *Plan
 	minValue := 0.0
+	minRatio := 0.0
 	first := true
 	for i := range cfg.Plans {
 		p := &cfg.Plans[i]
@@ -27,8 +28,13 @@ func (h *hedge) AddPair(s *snap) {
 		if pd := s.positions[p.Base]; pd != nil {
 			v = pd.value
 		}
-		if first || v < minValue {
+		ratio := 0.0
+		if p.Cap > 0 {
+			ratio = v / p.Cap
+		}
+		if first || ratio < minRatio {
 			first = false
+			minRatio = ratio
 			minValue = v
 			pick = p
 		}
@@ -38,17 +44,14 @@ func (h *hedge) AddPair(s *snap) {
 		return
 	}
 
-	// 持仓价值已达上限（cap × cap_ratio）→ 不加仓
-	capValue := pick.Cap * cfg.Add.CapRatio
-	if minValue >= capValue {
-		h.log.Infof("加仓: %s 持仓价值 %.4f 已达上限 %.4f，跳过加仓", pick.Base, minValue, capValue)
+	//持仓占比已达上限（当前值 / cap ≥ cap_ratio）→ 不加仓
+	if minRatio >= cfg.Add.CapRatio {
+		h.log.Infof("加仓: %s 持仓占比 %.2f%% 已达上限 %.2f%%，跳过加仓", pick.Base, minRatio*100, cfg.Add.CapRatio*100)
 		return
 	}
 
-	
-
-	h.log.Infof("加仓: 选择持仓价值最小的 %s(当前 %.4f)，开一对新对冲(金额=%s USDT)",
-		pick.Base, minValue, ftos(pick.Usdt))
+	h.log.Infof("加仓: 选择 cap 占比最小的 %s(当前持仓 %.4f / cap %.4f = %.2f%%)，开一对新对冲(金额=%s USDT)",
+		pick.Base, minValue, pick.Cap, minRatio*100, ftos(pick.Usdt))
 	h.addPair(pick)
 }
 
