@@ -1,0 +1,15 @@
+# 运行配置（含 API 密钥）
+.env
+
+# 数据库与日志
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.log.gz
+
+# 编译产物
+Grid
+Grid.exe
+*.exe
+*.exe~

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/phrynus/plog"
 )
 
 // RestError 表示币安 REST 接口返回的业务错误，Code 为错误码，Msg 为错误描述。
@@ -89,6 +91,7 @@ func (c *restClient) do(ctx context.Context, method, path string, params map[str
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		plog.Warnf("[请求] REST %s %s 网络失败: %v", method, path, err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -100,10 +103,13 @@ func (c *restClient) do(ctx context.Context, method, path string, params map[str
 	if resp.StatusCode != http.StatusOK {
 		var re RestError
 		if json.Unmarshal(body, &re) == nil && re.Code != 0 {
+			plog.Warnf("[请求] REST %s %s 返回错误 code=%d msg=%s", method, path, re.Code, re.Msg)
 			return nil, &re
 		}
+		plog.Warnf("[请求] REST %s %s 失败 HTTP %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(body)))
 		return nil, fmt.Errorf("binance rest %s %s 失败: HTTP %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+	plog.Debugf("[请求] REST %s %s 成功", method, path)
 	return body, nil
 }
 

@@ -30,7 +30,7 @@ type UserData struct {
 	events chan *WsUserDataEvent // 待分发的事件队列，由单个 goroutine 顺序消费
 
 	subMu sync.Mutex
-	subs  map[string]*subEntry // 订单事件订阅，键为「客户端订单号-状态」
+	subs  map[string]*subEntry // 订单事件订阅，键为「客户端订单号」
 }
 
 // NewUserData 创建并启动 UserData，随后最多等待 30 秒直到数据流就绪（超时不报错）。
@@ -51,7 +51,9 @@ func NewUserData() *UserData {
 	go u.dispatch()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_ = u.WaitReady(ctx)
+	if err := u.WaitReady(ctx); err != nil {
+		plog.Warnf("[数据流] 等待用户数据流就绪超时/失败: %v", err)
+	}
 	return u
 }
 
@@ -84,6 +86,7 @@ func (u *UserData) dispatch() {
 		case ev := <-u.events:
 			u.userHandler(ev)
 		case <-u.stop:
+			plog.Debugf("[数据流] 事件分发协程退出")
 			return
 		}
 	}
@@ -101,6 +104,7 @@ func (u *UserData) Close() {
 	conn := u.conn
 	u.conn = nil
 	u.mu.Unlock()
+	plog.Debugf("[数据流] 关闭用户数据流")
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -116,8 +120,10 @@ func (u *UserData) run() {
 		}
 
 		if u.getListenKey() == "" {
+			plog.Debugf("[数据流] 创建 listenKey")
 			lk, err := u.newListenKey()
 			if err != nil {
+				plog.Warnf("[数据流] 创建 listenKey 失败, %v 后重试: %v", backoff, err)
 				if !u.sleep(backoff) {
 					return
 				}
@@ -125,11 +131,14 @@ func (u *UserData) run() {
 				continue
 			}
 			u.setListenKey(lk)
+			plog.Debugf("[数据流] listenKey 已创建: %s", lk)
 			backoff = time.Second
 		}
 
+		plog.Debugf("[数据流] 建立用户数据流连接")
 		conn, err := u.dial()
 		if err != nil {
+			plog.Warnf("[数据流] 建立用户数据流连接失败, %v 后重试: %v", backoff, err)
 			u.clearListenKey()
 			if !u.sleep(backoff) {
 				return
@@ -147,6 +156,7 @@ func (u *UserData) run() {
 		u.conn = conn
 		u.ready = true
 		u.mu.Unlock()
+		plog.Infof("[数据流] 用户数据流已就绪")
 		backoff = time.Second
 
 		keepaliveStop := make(chan struct{})
@@ -161,6 +171,7 @@ func (u *UserData) run() {
 			return
 		}
 
+		plog.Debugf("[数据流] 用户数据流断开, 清理 listenKey 后重建")
 		u.clearListenKey()
 	}
 }
@@ -197,6 +208,7 @@ func (u *UserData) readLoop(conn *websocket.Conn) {
 		_ = conn.SetReadDeadline(time.Now().Add(userDataPongWait))
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			plog.Debugf("[数据流] 用户数据流读取结束: %v", err)
 			return
 		}
 		u.handleMessage(data)
@@ -207,10 +219,11 @@ func (u *UserData) readLoop(conn *websocket.Conn) {
 func (u *UserData) handleMessage(data []byte) {
 	var event WsUserDataEvent
 	if err := json.Unmarshal(data, &event); err != nil {
-		plog.Warnf("exchange: 解析用户数据流消息失败: %v", err)
+		plog.Warnf("[数据流] 解析用户数据流消息失败: %v 原文=%s", err, data)
 		return
 	}
 	if event.Event == "listenKeyExpired" {
+		plog.Warnf("[数据流] listenKey 已过期, 断开连接触发重建")
 		u.clearListenKey()
 		u.closeConn()
 		return
@@ -265,9 +278,12 @@ func (u *UserData) renewListenKey() {
 	ctx, cancel := context.WithTimeout(context.Background(), userDataRenewTimeout)
 	defer cancel()
 	if err := u.rest.keepaliveListenKey(ctx, lk); err != nil {
+		plog.Warnf("[数据流] 续期 listenKey 失败, 断开连接触发重建: %v", err)
 		u.clearListenKey()
 		u.closeConn()
+		return
 	}
+	plog.Debugf("[数据流] listenKey 已续期")
 }
 
 func (u *UserData) getListenKey() string {

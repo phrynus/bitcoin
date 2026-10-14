@@ -60,8 +60,8 @@ const (
 // ---------------------------------------------------------------------------
 
 var (
-	// exc 为全局 Exchange 单例，由 Init 赋值。
-	exc *Exchange
+	// Exc 为全局 Exchange 单例，由 Init 赋值。
+	Exc *Exchange
 
 	// 当前生效的接入地址，默认实盘；由 demoMu 保护，可并发读写。
 	demoMu    sync.RWMutex
@@ -108,35 +108,46 @@ func Init(demo bool, apiKey, secret, proxy string) (*Exchange, error) {
 	rest := newRestClient()
 	ctx := context.Background()
 
+	plog.Debugf("[连接] 开始初始化交易所 模式=%s REST=%s", demoLabel(demo), currentRestURL())
+
+	plog.Debugf("[连接] 探测 REST 连通性 /fapi/v1/ping")
 	if err := rest.ping(ctx); err != nil {
 		return nil, err
 	}
 
+	plog.Debugf("[连接] 查询服务器时间 /fapi/v1/time")
 	serverTime, err := rest.serverTime(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	plog.Debugf("[连接] 拉取交易对信息 /fapi/v1/exchangeInfo")
 	info, err := rest.exchangeInfo(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	exc = &Exchange{
+	offset := time.Now().UnixMilli() - serverTime
+	symbols := buildSymbols(info)
+
+	Exc = &Exchange{
 		rest: rest,
 
-		timeOffset: time.Now().UnixMilli() - serverTime,
-		symbols:    buildSymbols(info),
+		timeOffset: offset,
+		symbols:    symbols,
 
 		stop: make(chan struct{}),
 	}
 
-	go exc.startAutoRefresh()
+	plog.Infof("[连接] 交易所初始化完成 模式=%s 可用交易对=%d 个 时间偏移=%dms",
+		demoLabel(demo), len(symbols), offset)
 
-	return exc, nil
+	go Exc.startAutoRefresh()
+
+	return Exc, nil
 }
 
-func (e *Exchange) getSymbol(symbol string) (*SymbolInfo, bool) {
+func (e *Exchange) GetSymbol(symbol string) (*SymbolInfo, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	si, ok := e.symbols[symbol]
@@ -145,10 +156,10 @@ func (e *Exchange) getSymbol(symbol string) (*SymbolInfo, bool) {
 
 // timeOffset 返回本地时间相对币安服务器时间的偏移（毫秒）；未初始化时返回 0。
 func timeOffset() int64 {
-	if exc == nil {
+	if Exc == nil {
 		return 0
 	}
-	return exc.timeOffset
+	return Exc.timeOffset
 }
 
 // Close 停止后台交易对刷新 goroutine。可重复调用。
@@ -158,6 +169,7 @@ func (e *Exchange) Close() {
 		case <-e.stop:
 		default:
 			close(e.stop)
+			plog.Debugf("[交易对] 停止交易对后台刷新")
 		}
 	}
 }
@@ -176,25 +188,27 @@ func (e *Exchange) startAutoRefresh() {
 }
 
 func (e *Exchange) refreshSymbols() {
+	plog.Debugf("[交易对] 后台刷新交易对信息")
 	info, err := e.rest.exchangeInfo(context.Background())
 	if err != nil {
-		plog.Warnf("exchange: 刷新交易对信息失败: %v", err)
+		plog.Warnf("[交易对] 刷新交易对信息失败, 沿用旧表: %v", err)
 		return
 	}
 	newSymbols := buildSymbols(info)
 	e.mu.Lock()
 	e.symbols = newSymbols
 	e.mu.Unlock()
+	plog.Infof("[交易对] 交易对信息已刷新 可用交易对=%d 个", len(newSymbols))
 }
 
 // FixPrice 按交易对规则修正价格：先截断到 MinPrice/MaxPrice 区间，再向下取整到 TickSize 的整数倍。
 // 交易对不在列表中，或修正后仍不满足规则（越界、非 TickSize 倍数）时返回错误。
 func (e *Exchange) FixPrice(symbol string, price float64) (float64, error) {
-	si, ok := e.getSymbol(symbol)
+	si, ok := e.GetSymbol(symbol)
 	if !ok {
 		return 0, fmt.Errorf("交易对 %s 不在 Symbols 交易对列表中", symbol)
 	}
-	fp, err := fixPriceText(si, strconv.FormatFloat(price, 'f', -1, 64))
+	fp, err := FixPriceText(si, strconv.FormatFloat(price, 'f', -1, 64))
 	if err != nil {
 		return 0, err
 	}
@@ -204,7 +218,7 @@ func (e *Exchange) FixPrice(symbol string, price float64) (float64, error) {
 // FixQuantity 按交易对规则修正数量：先截断到 MinQuantity/MaxQuantity 区间，再向下取整到 StepSize 的整数倍。
 // 交易对不在列表中，或修正后仍不满足规则（越界、非 StepSize 倍数）时返回错误。
 func (e *Exchange) FixQuantity(symbol string, quantity float64) (float64, error) {
-	si, ok := e.getSymbol(symbol)
+	si, ok := e.GetSymbol(symbol)
 	if !ok {
 		return 0, fmt.Errorf("交易对 %s 不在 Symbols 交易对列表中", symbol)
 	}
@@ -218,11 +232,11 @@ func (e *Exchange) FixQuantity(symbol string, quantity float64) (float64, error)
 // FixOrder 同时修正价格与数量；若修正后名义价值低于 MinNotional，会自动向上取整数量以满足要求。
 // 交易对不在列表中、价格或数量非法，或无法在最大数量限制内满足最小名义价值时返回错误。
 func (e *Exchange) FixOrder(symbol string, price, quantity float64) (float64, float64, error) {
-	si, ok := e.getSymbol(symbol)
+	si, ok := e.GetSymbol(symbol)
 	if !ok {
 		return 0, 0, fmt.Errorf("交易对 %s 不在 Symbols 交易对列表中", symbol)
 	}
-	fp, fq, err := fixOrderText(si,
+	fp, fq, err := FixOrderText(si,
 		strconv.FormatFloat(price, 'f', -1, 64),
 		strconv.FormatFloat(quantity, 'f', -1, 64))
 	if err != nil {
@@ -248,9 +262,19 @@ func setDemo(on bool) {
 	demo = on
 	if on {
 		restURL, tradeURL, streamURL = demoRestURL, demoTradeURL, demoStreamURL
+		plog.Debugf("[连接] 接入地址切换为模拟盘 REST=%s WA=%s STREAM=%s", restURL, tradeURL, streamURL)
 		return
 	}
 	restURL, tradeURL, streamURL = liveRestURL, liveTradeURL, liveStreamURL
+	plog.Debugf("[连接] 接入地址切换为实盘 REST=%s WA=%s STREAM=%s", restURL, tradeURL, streamURL)
+}
+
+// demoLabel 返回运行模式的中文名称，供日志展示。
+func demoLabel(on bool) string {
+	if on {
+		return "模拟盘"
+	}
+	return "实盘"
 }
 
 // Demo 返回当前是否为模拟盘。

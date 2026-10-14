@@ -1,9 +1,10 @@
 package exchange
 
 import (
-	"strconv"
 	"sync"
 	"time"
+
+	"github.com/phrynus/plog"
 )
 
 // WsUserDataEvent 为用户数据流推送的事件。
@@ -52,11 +53,31 @@ type WsOrderTradeUpdate struct {
 	GTD                  int64  `json:"gtd"` // GTD 订单失效时间（毫秒）
 }
 
+// SubOrderFunc 为订单事件回调：status 为币安订单状态（NEW、PARTIALLY_FILLED、FILLED、CANCELED、EXPIRED 等），
+// o 为该订单完整的订单/成交更新载荷。订单每次状态推送都会回调一次，是否重复由调用方自行处理。
+type SubOrderFunc func(status string, o WsOrderTradeUpdate)
+
+// SubOption 为 Subscribe 的可选配置项。
+type SubOption func(*subEntry)
+
+// WithTimeout 设置超时：在 timeout 内未收到该订单的任何事件时自动取消订阅，
+// 并在 onTimeout 非空时异步调用它。timeout <= 0 时视为不超时（不做任何设置）。
+func WithTimeout(timeout time.Duration, onTimeout func()) SubOption {
+	return func(e *subEntry) {
+		if timeout > 0 {
+			e.timeout = timeout
+			e.onTimeout = onTimeout
+		}
+	}
+}
+
 type subEntry struct {
-	f     func(o WsOrderTradeUpdate)
-	timer *time.Timer
-	done  chan struct{}
-	once  sync.Once
+	f         SubOrderFunc
+	timer     *time.Timer
+	timeout   time.Duration
+	onTimeout func()
+	done      chan struct{}
+	once      sync.Once
 }
 
 func (e *subEntry) finish() {
@@ -66,48 +87,31 @@ func (e *subEntry) finish() {
 func (u *UserData) userHandler(event *WsUserDataEvent) {
 	if event.Event == "ORDER_TRADE_UPDATE" {
 		u.handleOrderTradeUpdate(event)
+		return
 	}
+	plog.Debugf("[数据流] 忽略非订单事件 类型=%s", event.Event)
 }
 
-// orderStatus 把币安订单状态映射为订阅使用的状态值：0=NEW、1=PARTIALLY_FILLED、2=FILLED。
-// 其余状态（CANCELED、EXPIRED 等）返回 false，不做任何分发。
-func orderStatus(status string) (int, bool) {
-	switch status {
-	case "NEW":
-		return 0, true
-	case "PARTIALLY_FILLED":
-		return 1, true
-	case "FILLED":
-		return 2, true
-	default:
-		return 0, false
-	}
-}
-
+// handleOrderTradeUpdate 把订单事件按客户端订单号分发给对应的订阅。
+// 不做状态过滤：NEW、PARTIALLY_FILLED、FILLED、CANCELED、EXPIRED 等所有状态都会触发回调，
+// 由回调根据 status 自行判断；订阅不会因收到事件而移除，重复推送会重复回调。
+// 首次收到事件后会停止超时计时器（之后不再触发超时）。
 func (u *UserData) handleOrderTradeUpdate(event *WsUserDataEvent) {
 	o := event.OrderTradeUpdate
 
-	st, ok := orderStatus(o.Status)
+	u.subMu.Lock()
+	e, ok := u.subs[o.ClientOrderID]
+	if ok && e.timer != nil {
+		e.timer.Stop()
+	}
+	u.subMu.Unlock()
 	if !ok {
+		plog.Debugf("[数据流] 订单事件无匹配订阅, 忽略 订单=%s 状态=%s", o.ClientOrderID, o.Status)
 		return
 	}
 
-	key := o.ClientOrderID + "-" + strconv.Itoa(st)
-	u.subMu.Lock()
-	e, ok := u.subs[key]
-	if ok {
-		delete(u.subs, key)
-	}
-	u.subMu.Unlock()
-	if ok {
-		if e.timer != nil {
-			e.timer.Stop()
-		}
-		go func() {
-			defer e.finish()
-			e.f(o)
-		}()
-	}
+	plog.Debugf("[数据流] 分发订单事件 订单=%s 状态=%s 累计成交=%s", o.ClientOrderID, o.Status, o.AccumulatedFilledQty)
+	go e.f(o.Status, o)
 }
 
 // clearSubs 取消全部订阅：停止计时器并关闭各自的 done channel，避免 Close 后残留回调。
@@ -122,61 +126,72 @@ func (u *UserData) clearSubs() {
 		}
 		e.finish()
 	}
+	plog.Debugf("[数据流] 已清空全部订单订阅 数量=%d", len(subs))
 }
 
-// Subscribe 注册一个订单事件回调，key 由客户端订单号与状态组成。
-// status 取 0=NEW、1=PARTIALLY_FILLED、2=FILLED，与订单事件到达时的状态匹配。
-// 事件到达时会移除该订阅，并异步执行 f，因此 f 返回前返回的 channel 不会关闭。
-// timeout > 0 且 onTimeout 非空时启动计时器，超时未收到事件则移除订阅并异步调用 onTimeout。
-// 同一订单与状态的旧订阅会被覆盖（旧计时器停止）。
-// 返回的 channel 在订阅被触发、取消或超时后关闭；f 为 nil 或 UserData 已关闭时返回 nil。
-func (u *UserData) Subscribe(id string, status int, f func(o WsOrderTradeUpdate), timeout time.Duration, onTimeout func()) <-chan struct{} {
+// Subscribe 按客户端订单号注册订单事件回调。
+// 该订单的任意状态变化（NEW、PARTIALLY_FILLED、FILLED、CANCELED、EXPIRED 等）都会触发 f，
+// f 收到 status（订单状态）与 o（订单/成交数据）两个参数；部分成交与完全成交都会触发，且会重复回调。
+// 订阅不会自动移除，去重与常用取消由调用方自行处理（可用 Unsubscribe）。
+// 可选配置见 WithTimeout：不传则不超时；同一订单的旧订阅会被新订阅覆盖（旧计时器停止）。
+// 返回的 channel 在订阅被取消、超时或 UserData 关闭后关闭；f 为 nil 或 UserData 已关闭时返回 nil。
+func (u *UserData) Subscribe(id string, f SubOrderFunc, opts ...SubOption) <-chan struct{} {
 	if f == nil || u.isClosed() {
 		return nil
 	}
-	key := id + "-" + strconv.Itoa(status)
 	e := &subEntry{f: f, done: make(chan struct{})}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(e)
+		}
+	}
 
 	u.subMu.Lock()
 	if u.subs == nil {
 		u.subs = make(map[string]*subEntry)
 	}
 
-	if old, ok := u.subs[key]; ok && old.timer != nil {
+	if old, ok := u.subs[id]; ok && old.timer != nil {
 		old.timer.Stop()
 	}
-	u.subs[key] = e
-	if timeout > 0 && onTimeout != nil {
-		e.timer = time.AfterFunc(timeout, func() {
+	u.subs[id] = e
+	if e.timeout > 0 {
+		e.timer = time.AfterFunc(e.timeout, func() {
 			u.subMu.Lock()
-			cur, ok := u.subs[key]
+			cur, ok := u.subs[id]
 			if ok && cur == e {
-				delete(u.subs, key)
+				delete(u.subs, id)
 			}
 			u.subMu.Unlock()
 			if ok && cur == e {
 				go func() {
 					defer e.finish()
-					onTimeout()
+					if e.onTimeout != nil {
+						e.onTimeout()
+					}
 				}()
 			}
 		})
 	}
 	u.subMu.Unlock()
+	plog.Debugf("[数据流] 建立订单订阅 订单=%s", id)
 	return e.done
 }
 
-// Unsubscribe 取消由 id 与 status 指定且尚未触发的订阅，停止其计时器并关闭返回的 channel。
+// Unsubscribe 取消由客户端订单号指定的订阅，停止其计时器并关闭返回的 channel。
 // 订阅不存在时为空操作。
-func (u *UserData) Unsubscribe(id string, status int) {
-	key := id + "-" + strconv.Itoa(status)
+func (u *UserData) Unsubscribe(id string) {
 	u.subMu.Lock()
-	defer u.subMu.Unlock()
-	if e, ok := u.subs[key]; ok {
+	e, ok := u.subs[id]
+	if ok {
+		delete(u.subs, id)
+	}
+	u.subMu.Unlock()
+	if ok {
 		if e.timer != nil {
 			e.timer.Stop()
 		}
-		delete(u.subs, key)
 		e.finish()
+		plog.Debugf("[数据流] 取消订单订阅 订单=%s", id)
 	}
 }

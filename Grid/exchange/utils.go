@@ -329,7 +329,7 @@ func decOrZero(s string) decimal.Decimal {
 	return d
 }
 
-func fixPriceText(si *SymbolInfo, price string) (string, error) {
+func FixPriceText(si *SymbolInfo, price string) (string, error) {
 	if si == nil || si.PriceFilter == nil {
 		return price, nil
 	}
@@ -449,11 +449,11 @@ func validateQuantity(lf *MarketLotSizeFilter, q decimal.Decimal) error {
 	return nil
 }
 
-func fixOrderText(si *SymbolInfo, price, quantity string) (string, string, error) {
+func FixOrderText(si *SymbolInfo, price, quantity string) (string, string, error) {
 	if si == nil {
 		return price, quantity, errors.New("SymbolInfo 为空, 无法修正订单数据")
 	}
-	fp, err := fixPriceText(si, price)
+	fp, err := FixPriceText(si, price)
 	if err != nil {
 		return "", "", err
 	}

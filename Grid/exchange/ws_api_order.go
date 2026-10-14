@@ -94,10 +94,10 @@ func (s *OrderService) normalize() error {
 		s.positionSide = "BOTH"
 	}
 
-	if exc == nil {
+	if Exc == nil {
 		return nil
 	}
-	si, ok := exc.getSymbol(s.symbol)
+	si, ok := Exc.GetSymbol(s.symbol)
 	if !ok {
 		return fmt.Errorf("交易对 %s 不在 Symbols 交易对列表中", s.symbol)
 	}
@@ -107,7 +107,7 @@ func (s *OrderService) normalize() error {
 	}
 
 	if s.price != "" && s.quantity != "" {
-		fp, fq, err := fixOrderText(si, s.price, s.quantity)
+		fp, fq, err := FixOrderText(si, s.price, s.quantity)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func (s *OrderService) fixUsdt(si *SymbolInfo) error {
 	}
 
 	qty := amount.Div(price)
-	fp, fq, err := fixOrderText(si, s.price, qty.String())
+	fp, fq, err := FixOrderText(si, s.price, qty.String())
 	if err != nil {
 		return err
 	}

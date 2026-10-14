@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/phrynus/plog"
 )
 
 // WsApi 是基于币安 WebSocket API（ws-fapi）的请求/响应客户端：单连接内按请求 id 匹配响应，
@@ -88,7 +89,9 @@ func NewWsApi() *WsApi {
 	go w.run()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_ = w.WaitReady(ctx)
+	if err := w.WaitReady(ctx); err != nil {
+		plog.Warnf("[连接] 等待 WebSocket 连接就绪超时/失败: %v", err)
+	}
 	return w
 }
 
@@ -142,20 +145,27 @@ func (w *WsApi) request(ctx context.Context, method string, params map[string]an
 		w.mu.Unlock()
 	}()
 
+	plog.Debugf("[请求] 发起请求 方法=%s id=%s 签名=%v", method, req.ID, signed)
+
 	if err := w.send(req); err != nil {
+		plog.Warnf("[请求] 发送请求失败 方法=%s id=%s: %v", method, req.ID, err)
 		return nil, err
 	}
 
 	select {
 	case resp := <-ch:
 		if resp.err != nil {
+			plog.Warnf("[请求] 请求返回本地错误 方法=%s id=%s: %v", method, req.ID, resp.err)
 			return nil, resp.err
 		}
 		if resp.Error != nil {
+			plog.Warnf("[请求] 请求返回币安错误 方法=%s id=%s: %v", method, req.ID, resp.Error)
 			return nil, resp.Error
 		}
+		plog.Debugf("[请求] 请求成功 方法=%s id=%s", method, req.ID)
 		return resp, nil
 	case <-ctx.Done():
+		plog.Warnf("[请求] 请求超时/取消 方法=%s id=%s: %v", method, req.ID, ctx.Err())
 		return nil, ctx.Err()
 	case <-w.stop:
 		return nil, ErrClosed
@@ -186,6 +196,7 @@ func (w *WsApi) Close() {
 	conn := w.conn
 	w.conn = nil
 	w.mu.Unlock()
+	plog.Debugf("[连接] 关闭 WebSocket 交易客户端")
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -202,6 +213,7 @@ func (w *WsApi) run() {
 		}
 
 		if err := w.dial(); err != nil {
+			plog.Warnf("[连接] 建立 WebSocket 连接失败, %v 后重试: %v", backoff, err)
 			select {
 			case <-time.After(backoff):
 			case <-w.stop:
@@ -219,6 +231,7 @@ func (w *WsApi) run() {
 		go w.keepalive(pingStop)
 		w.readLoop()
 		close(pingStop)
+		plog.Debugf("[连接] WebSocket 连接断开, 唤醒在途请求并重建连接")
 		w.failPending(ErrConnReset)
 		w.clearConn()
 	}
@@ -248,6 +261,7 @@ func (w *WsApi) dial() error {
 	w.conn = conn
 	close(w.ready)
 	w.mu.Unlock()
+	plog.Infof("[连接] WebSocket 连接已就绪 %s", w.url)
 	return nil
 }
 
@@ -270,6 +284,7 @@ func (w *WsApi) readLoop() {
 		_ = conn.SetReadDeadline(time.Now().Add(wsPongWait))
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			plog.Debugf("[连接] WebSocket 读取结束: %v", err)
 			return
 		}
 		var resp wsResponse
@@ -367,6 +382,9 @@ func (w *WsApi) sign(params map[string]any) map[string]any {
 
 func (w *WsApi) failPending(err error) {
 	w.mu.Lock()
+	if len(w.pending) > 0 {
+		plog.Warnf("[请求] 连接断开, 唤醒在途请求 数量=%d", len(w.pending))
+	}
 	for id, ch := range w.pending {
 		delete(w.pending, id)
 		ch <- &wsResponse{ID: id, err: err}
