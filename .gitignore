@@ -44,7 +44,8 @@ Maker
 Grid/data.db*
 *.log
 *.sum
-Grid
-Grid.exe
+/Grid/grid
+grid.exe
 *.exe
 *.exe~
+*_test.go
