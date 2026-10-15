@@ -36,7 +36,6 @@ coin/coins
 config.yaml
 .*/
 FuturesHedge/FuturesHedge.zip
-Grid/main1
 app.log
 Force/liquidation_csv
 log
@@ -45,4 +44,7 @@ Maker
 Grid/data.db*
 *.log
 *.sum
-Grid/main.go
+Grid
+Grid.exe
+*.exe
+*.exe~

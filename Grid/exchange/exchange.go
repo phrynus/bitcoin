@@ -23,11 +23,11 @@ import (
 const (
 	liveRestURL   = "https://fapi.binance.com"             // 实盘 REST
 	liveTradeURL  = "wss://ws-fapi.binance.com/ws-fapi/v1" // 实盘 WS API（行情、账户、交易）
-	liveStreamURL = "wss://fstream.binance.com/ws/"        // 实盘用户数据流前缀，后接 listenKey
+	liveStreamURL = "wss://fstream.binance.com/private/ws" // 实盘私有用户数据流
 
 	demoRestURL   = "https://demo-fapi.binance.com"              // 模拟盘 REST
 	demoTradeURL  = "wss://testnet.binancefuture.com/ws-fapi/v1" // 模拟盘 WS API（行情、账户、交易）
-	demoStreamURL = "wss://demo-fstream.binance.com/ws/"         // 模拟盘用户数据流前缀，后接 listenKey
+	demoStreamURL = "wss://fstream.binancefuture.com/private/ws" // 模拟盘私有用户数据流
 
 	// restClient
 	restTimeout       = 15 * time.Second // 单次 REST 请求超时

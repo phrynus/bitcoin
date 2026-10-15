@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"main/exchange"
+	"grid/exchange"
 
 	"github.com/phrynus/plog"
 )
@@ -136,7 +136,7 @@ func doHangingProfit(i int64, filledQty string) {
 		Symbol(symbol).
 		Side("SELL").
 		PositionSide("LONG").
-		TimeInForce("GTX").
+		// TimeInForce("GTX").
 		Type("LIMIT").
 		Quantity(filledQty).
 		Price(g.AskPrice)

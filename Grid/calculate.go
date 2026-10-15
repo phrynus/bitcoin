@@ -1,7 +1,7 @@
 package main
 
 import (
-	"main/exchange"
+	"grid/exchange"
 
 	"github.com/phrynus/plog"
 )

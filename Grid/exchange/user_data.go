@@ -131,7 +131,7 @@ func (u *UserData) run() {
 				continue
 			}
 			u.setListenKey(lk)
-			plog.Debugf("[数据流] listenKey 已创建: %s", lk)
+			plog.Debugf("[数据流] listenKey 已创建 (长度=%d)", len(lk))
 			backoff = time.Second
 		}
 
@@ -176,12 +176,19 @@ func (u *UserData) run() {
 	}
 }
 
-// dial 以 streamURL 拼接 listenKey 建立用户数据流连接，并注册 pong 处理器以续期读超时。
+// dial 以 listenKey 查询参数建立私有用户数据流连接，并注册 pong 处理器以续期读超时。
 func (u *UserData) dial() (*websocket.Conn, error) {
 	lk := u.getListenKey()
 	if lk == "" {
 		return nil, errors.New("listenKey 为空")
 	}
+	endpoint, err := url.Parse(currentStreamURL())
+	if err != nil {
+		return nil, err
+	}
+	query := endpoint.Query()
+	query.Set("listenKey", lk)
+	endpoint.RawQuery = query.Encode()
 
 	d := websocket.Dialer{HandshakeTimeout: userDataDialTimeout}
 	if u.proxy != "" {
@@ -192,7 +199,7 @@ func (u *UserData) dial() (*websocket.Conn, error) {
 		d.Proxy = http.ProxyURL(p)
 	}
 
-	conn, _, err := d.Dial(currentStreamURL()+lk, nil)
+	conn, _, err := d.Dial(endpoint.String(), nil)
 	if err != nil {
 		return nil, err
 	}

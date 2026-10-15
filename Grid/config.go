@@ -18,6 +18,15 @@ func maskKey(s string) string {
 	return fmt.Sprintf("(长度%d)", len(s))
 }
 
+func configLogValue(key, value string) string {
+	upperKey := strings.ToUpper(key)
+	if strings.Contains(upperKey, "KEY") || strings.Contains(upperKey, "SECRET") ||
+		strings.Contains(upperKey, "TOKEN") || strings.Contains(upperKey, "PASSWORD") || upperKey == "PROXY" {
+		return maskKey(value)
+	}
+	return value
+}
+
 // modeName 返回运行模式的中文名称，用于日志可读性。
 func modeName(demo bool) string {
 	if demo {
@@ -112,7 +121,7 @@ func loadEnv(path string) {
 		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, val)
 			loaded++
-			plog.Debugf("[配置] 载入配置项 %s=%q", key, val)
+			plog.Debugf("[配置] 载入配置项 %s=%q", key, configLogValue(key, val))
 		} else {
 			plog.Debugf("[配置] 配置项 %s 已由系统环境变量提供, 跳过文件值", key)
 		}

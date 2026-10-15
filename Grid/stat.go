@@ -3,7 +3,7 @@ package main
 import (
 	"sync"
 
-	"main/exchange"
+	"grid/exchange"
 
 	"github.com/phrynus/plog"
 )
